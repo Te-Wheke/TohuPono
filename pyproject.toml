@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tohupono"
+version = "0.1.0"
+description = "Local-first file-origin proof infrastructure."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "reportlab>=4",
+]
+
+[project.optional-dependencies]
+blake3 = ["blake3>=0.4"]
+cryptography = ["cryptography>=42"]
+test = ["pytest>=8"]
+
+[project.scripts]
+tohupono = "tohupono.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tohupono*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
