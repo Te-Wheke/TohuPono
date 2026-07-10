@@ -11,6 +11,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from tohupono.core.proof import load_manifest
 from tohupono.trust.keys import sign_bytes
 from tohupono.verdicts.classifier import manifest_signature_status
+from tohupono.core.proof import verify_evidence_chain
 
 COMMUNITY_TEXT = (
     "Community Edition: full proof functionality for Maori sovereignty, iwi, hapu, marae, and community use."
@@ -38,6 +39,12 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
     if not isinstance(file_info, dict):
         file_info = {}
     signature_status = manifest_signature_status(proof)
+    chain_path = proof.parent / "evidence_chain.jsonl"
+    if chain_path.exists():
+        chain_ok, _ = verify_evidence_chain(chain_path)
+        evidence_chain_status = "valid" if chain_ok else "invalid"
+    else:
+        evidence_chain_status = "missing"
 
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(
@@ -66,6 +73,7 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         ["SHA-512", _safe(file_info.get("sha512"))],
         ["BLAKE3", _safe(file_info.get("blake3") or "unavailable")],
         ["Manifest signature status", signature_status],
+        ["Evidence chain status", evidence_chain_status],
     ]
     table = Table(rows, colWidths=[120, 360])
     table.setStyle(

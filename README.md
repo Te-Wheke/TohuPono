@@ -2,7 +2,7 @@
 
 TohuPono is a deterministic, local-first file-origin proof system. It records evidence about digital files and produces evidence-based verification outputs for a legal-support evidence bundle.
 
-It proves file identity, integrity relative to a sealed digest, observed metadata, and report integrity. It does not make unsupported claims about real-world truth.
+It proves file identity, integrity relative to a sealed digest, observed metadata, and report integrity. It does not make unsupported claims about external truth.
 
 ## Quickstart
 
@@ -13,6 +13,9 @@ tohupono inspect ./file.pdf
 tohupono hash ./file.pdf --algorithm sha256
 tohupono prove ./file.pdf --output proof_packet/
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --output verification_report.md
+tohupono verify ./file.pdf --proof proof_packet/manifest.json --json
+tohupono verify-chain proof_packet/evidence_chain.jsonl --json
+tohupono inspect-proof proof_packet/manifest.json --json
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -38,6 +41,21 @@ proof_packet/signatures/manifest.pub
 
 The manifest signature protects the proof packet before the PDF report layer. The PDF report signature is separate and protects the human-readable report file.
 
+## v0.2.0 Development Goals
+
+The v0.2.0 cycle hardens deterministic proof lineage for any file type.
+
+- File identity is the byte digest. Path, name, extension, and MIME type are observed metadata only.
+- Copied or renamed files verify when their byte digest matches the proof manifest.
+- Proof IDs are derived from canonical seed data: schema version, tool version, file SHA-256, file size, sealed timestamp, and manifest version.
+- `evidence_chain.jsonl` events include canonical event hashes and previous-event links.
+- Manifest keys sign proof manifests. Report keys sign final PDF bytes. These keys must remain separate.
+- `verify --json` emits deterministic structured diagnostics for automation.
+- `verify-chain` checks standalone evidence-chain JSONL files.
+- `inspect-proof` inspects proof packet metadata without verifying a source file.
+
+Inspecting a proof is not the same as verifying a source file. `inspect-proof` reports manifest and packet status only. `verify` compares a supplied file's byte digest with the proof manifest.
+
 ## Proof Packet
 
 ```text
@@ -54,14 +72,59 @@ proof_packet/
 
 Source file content is not copied unless `--include-payload` is explicitly used.
 
+Evidence-chain hashes make recorded events tamper-evident under the local proof packet model. They do not prove external truth, complete custody, or legal admissibility by themselves.
+
 ## Verdicts
 
 - `VERIFIED_INTEGRITY`: current digest matches the sealed digest.
 - `ALTERED_AFTER_PROOF`: current digest differs from the sealed digest.
 - `UNPROVEN`: available evidence is insufficient.
 
+Manifest signature status values are `valid`, `missing`, `invalid`, `unverified`, and `error`.
+
+Evidence-chain status values are `valid`, `missing`, `invalid`, and `error`.
+
+Legal-support boundary: This report supports evidence review by recording deterministic file identity, verification results, signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, or legal admissibility.
+
+## CLI Exit Codes
+
+TohuPono commands use a small exit-code policy:
+
+- `0`: success
+- `1`: verification failed or proof conflict
+- `2`: user or input error
+- `3`: internal or runtime error
+
+For example, `verify` returns `0` for `VERIFIED_INTEGRITY`, `1` for `ALTERED_AFTER_PROOF` or `PROVENANCE_CONFLICT`, and `2` for missing input files or missing proof manifests.
+
+JSON-mode command errors use this shape:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "MISSING_FILE",
+    "message": "..."
+  }
+}
+```
+
+Current error codes include `MISSING_FILE`, `MISSING_PROOF`, `INVALID_JSONL`, `INVALID_MANIFEST`, `INVALID_ARGUMENT`, `SIGNATURE_ERROR`, `CHAIN_ERROR`, and `INTERNAL_ERROR`.
+
+## Diagnostics Workflow
+
+```bash
+python -m tohupono prove ./sample.txt --output proof_packet
+python -m tohupono verify ./sample.txt --proof proof_packet/manifest.json --json
+python -m tohupono verify-chain proof_packet/evidence_chain.jsonl --json
+python -m tohupono inspect-proof proof_packet/manifest.json --json
+python -m tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
+```
+
+Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
+
 ## Offline Default
 
 TohuPono performs no network calls in the MVP. External integrations such as OpenTimestamps, RFC3161 TSA, C2PA, BagIt, and Sigstore/Rekor are planned later behind explicit user options.
 
-Reports use legal-support evidence bundle language. They must not be described as court-ready.
+Reports use legal-support evidence bundle language and must avoid unsupported legal sufficiency claims.

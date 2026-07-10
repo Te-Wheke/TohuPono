@@ -9,13 +9,118 @@ from typing import Sequence
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_text
 from tohupono.core.file_identity import Blake3UnavailableError, TohuPonoError, hash_file, inspect_file
-from tohupono.core.proof import create_proof_packet
+from tohupono.core.proof import create_proof_packet, evidence_chain_diagnostics, load_manifest
 from tohupono.reporting.pro_report import generate_report
-from tohupono.verdicts.classifier import verify_file, write_markdown, write_verdict
+from tohupono.trust.keys import KeyErrorWithAction
+from tohupono.verdicts.classifier import (
+    VERIFIED_INTEGRITY,
+    manifest_signature_status,
+    verify_file,
+    write_markdown,
+    write_verdict,
+)
+
+EXIT_SUCCESS = 0
+EXIT_VERIFICATION_FAILED = 1
+EXIT_USER_ERROR = 2
+EXIT_INTERNAL_ERROR = 3
 
 
 def _print_json(value: object) -> None:
     print(canonical_json_text(value))
+
+
+def _json_error(code: str, message: str) -> dict[str, object]:
+    return {"error": {"code": code, "message": message}, "status": "error"}
+
+
+def _emit_error(code: str, message: str, *, json_mode: bool, exit_code: int) -> int:
+    if json_mode:
+        _print_json(_json_error(code, message))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return exit_code
+
+
+def _missing_path_code(command: str, path_arg: str) -> str:
+    if command in {"verify", "report", "inspect-proof"} and "manifest" in path_arg.lower():
+        return "MISSING_PROOF"
+    return "MISSING_FILE"
+
+
+def _json_mode(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "json", False))
+
+
+def _proof_artefacts(manifest: Path) -> list[str]:
+    proof_dir = manifest.parent
+    names = [
+        "manifest.json",
+        "hashes.txt",
+        "metadata.json",
+        "evidence_chain.jsonl",
+        "warnings.json",
+        "signatures/manifest.sig",
+        "signatures/manifest.pub",
+    ]
+    return [name for name in names if (proof_dir / name).exists()]
+
+
+def inspect_proof_manifest(manifest_path: Path) -> dict[str, object]:
+    manifest = load_manifest(manifest_path)
+    file_info = manifest.get("file", {})
+    if not isinstance(file_info, dict):
+        file_info = {}
+    tool_info = manifest.get("tool", {})
+    if not isinstance(tool_info, dict):
+        tool_info = {}
+    warnings = manifest.get("warnings", [])
+    warnings_count = len(warnings) if isinstance(warnings, list) else 0
+    chain_result = evidence_chain_diagnostics(manifest_path.parent / "evidence_chain.jsonl")
+    return {
+        "available_artefacts": _proof_artefacts(manifest_path),
+        "boundary": "Proof manifest inspected. Source file was not verified in this command.",
+        "evidence_chain_status": chain_result["status"],
+        "file_sha256": file_info.get("sha256"),
+        "file_size": file_info.get("size_bytes"),
+        "manifest_signature_status": manifest_signature_status(manifest_path),
+        "manifest_version": manifest.get("manifest_version"),
+        "original_observed_file_path": file_info.get("path_observed"),
+        "proof_id": manifest.get("proof_id"),
+        "schema_version": manifest.get("schema_version"),
+        "sealed_timestamp": manifest.get("sealed_at_utc"),
+        "tool_version": tool_info.get("version"),
+        "warnings_count": warnings_count,
+    }
+
+
+def _print_verify_chain_human(result: dict[str, object]) -> None:
+    print(f"Evidence chain status: {result['status']}")
+    print(f"Path: {result['path']}")
+    print(f"Events: {result['event_count']}")
+    errors = result.get("errors", [])
+    if errors:
+        print("Diagnostics:")
+        for error in errors:
+            print(f"- {error}")
+
+
+def _print_inspect_proof_human(result: dict[str, object]) -> None:
+    print("Proof manifest inspected. Source file was not verified in this command.")
+    print(f"Proof ID: {result.get('proof_id') or 'unknown'}")
+    print(f"Schema version: {result.get('schema_version') or 'unknown'}")
+    print(f"Manifest version: {result.get('manifest_version') or 'unknown'}")
+    print(f"Tool version: {result.get('tool_version') or 'unknown'}")
+    print(f"Sealed timestamp: {result.get('sealed_timestamp') or 'unknown'}")
+    print(f"Original observed file path: {result.get('original_observed_file_path') or 'unknown'}")
+    print(f"File size: {result.get('file_size') if result.get('file_size') is not None else 'unknown'}")
+    print(f"SHA-256: {result.get('file_sha256') or 'unknown'}")
+    print(f"Manifest signature status: {result.get('manifest_signature_status') or 'unknown'}")
+    print(f"Evidence chain status: {result.get('evidence_chain_status') or 'unknown'}")
+    print(f"Warnings count: {result.get('warnings_count')}")
+    print("Available proof packet artefacts:")
+    for artefact in result.get("available_artefacts", []):
+        print(f"- {artefact}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,6 +144,15 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cmd.add_argument("file")
     verify_cmd.add_argument("--proof", required=True)
     verify_cmd.add_argument("--output")
+    verify_cmd.add_argument("--json", action="store_true")
+
+    verify_chain_cmd = sub.add_parser("verify-chain", help="Verify an evidence chain JSONL file.")
+    verify_chain_cmd.add_argument("evidence_chain")
+    verify_chain_cmd.add_argument("--json", action="store_true")
+
+    inspect_proof_cmd = sub.add_parser("inspect-proof", help="Inspect a proof manifest without a source file.")
+    inspect_proof_cmd.add_argument("manifest")
+    inspect_proof_cmd.add_argument("--json", action="store_true")
 
     report_cmd = sub.add_parser("report", help="Generate a signed PDF report.")
     report_cmd.add_argument("--proof", required=True)
@@ -56,22 +170,47 @@ def run(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "inspect":
             _print_json(inspect_file(Path(args.file)).to_dict())
+            return EXIT_SUCCESS
         elif args.command == "hash":
             try:
                 digest = hash_file(Path(args.file), args.algorithm)
             except Blake3UnavailableError as exc:
                 print(str(exc), file=sys.stderr)
-                return 2
+                return EXIT_USER_ERROR
             print(digest)
+            return EXIT_SUCCESS
         elif args.command == "prove":
             manifest = create_proof_packet(Path(args.file), Path(args.output), args.include_payload)
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
+            return EXIT_SUCCESS
         elif args.command == "verify":
             result = verify_file(Path(args.file), Path(args.proof))
             write_verdict(Path(args.proof), result)
             if args.output:
                 write_markdown(Path(args.output), result)
-            _print_json(result.to_dict())
+            _print_json(result.to_cli_json() if args.json else result.to_dict())
+            return EXIT_SUCCESS if result.verdict == VERIFIED_INTEGRITY else EXIT_VERIFICATION_FAILED
+        elif args.command == "verify-chain":
+            result = evidence_chain_diagnostics(Path(args.evidence_chain))
+            if args.json:
+                _print_json(result)
+            else:
+                _print_verify_chain_human(result)
+            status = result["status"]
+            if status == "valid":
+                return EXIT_SUCCESS
+            if status == "missing":
+                return EXIT_USER_ERROR
+            if status == "error":
+                return EXIT_INTERNAL_ERROR
+            return EXIT_VERIFICATION_FAILED
+        elif args.command == "inspect-proof":
+            result = inspect_proof_manifest(Path(args.manifest))
+            if args.json:
+                _print_json(result)
+            else:
+                _print_inspect_proof_human(result)
+            return EXIT_SUCCESS
         elif args.command == "report":
             sig_path = generate_report(
                 proof=Path(args.proof),
@@ -81,12 +220,29 @@ def run(argv: Sequence[str] | None = None) -> int:
                 fmt=args.format,
             )
             _print_json({"report": args.output, "signature": str(sig_path)})
+            return EXIT_SUCCESS
         else:
             parser.error("Unknown command")
-    except (FileNotFoundError, TohuPonoError, ValueError, json.JSONDecodeError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    return 0
+    except FileNotFoundError as exc:
+        missing_path = exc.filename or str(exc)
+        return _emit_error(
+            _missing_path_code(args.command, str(missing_path)),
+            str(exc),
+            json_mode=_json_mode(args),
+            exit_code=EXIT_USER_ERROR,
+        )
+    except json.JSONDecodeError as exc:
+        code = "INVALID_JSONL" if args.command == "verify-chain" else "INVALID_MANIFEST"
+        return _emit_error(code, str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
+    except TohuPonoError as exc:
+        return _emit_error("INVALID_ARGUMENT", str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
+    except ValueError as exc:
+        return _emit_error("INVALID_ARGUMENT", str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
+    except KeyErrorWithAction as exc:
+        return _emit_error("SIGNATURE_ERROR", str(exc), json_mode=_json_mode(args), exit_code=EXIT_INTERNAL_ERROR)
+    except Exception as exc:
+        return _emit_error("INTERNAL_ERROR", str(exc), json_mode=_json_mode(args), exit_code=EXIT_INTERNAL_ERROR)
+    return EXIT_SUCCESS
 
 
 def main(argv: Sequence[str] | None = None) -> None:

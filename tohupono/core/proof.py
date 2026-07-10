@@ -6,7 +6,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
@@ -14,11 +14,19 @@ from tohupono.core.file_identity import FileIdentity, inspect_file
 from tohupono.trust.keys import DEFAULT_MANIFEST_KEY, DEFAULT_MANIFEST_PUBLIC_KEY, sign_manifest_bytes
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
+MANIFEST_VERSION = "0.2.0"
+GENESIS_EVENT_HASH = "GENESIS"
+CHAIN_STATUS_VALID = "valid"
+CHAIN_STATUS_MISSING = "missing"
+CHAIN_STATUS_INVALID = "invalid"
+CHAIN_STATUS_ERROR = "error"
+ChainStatus = Literal["valid", "missing", "invalid", "error"]
 
 
 @dataclass(frozen=True)
 class ProofManifest:
     schema_version: str
+    manifest_version: str
     proof_id: str
     sealed_at_utc: str
     tool: dict[str, str]
@@ -37,15 +45,118 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def make_proof_id(identity: FileIdentity, sealed_at_utc: str) -> str:
-    source = {
+def proof_id_seed(identity: FileIdentity, sealed_at_utc: str) -> dict[str, object]:
+    return {
+        "file_sha256": identity.sha256,
+        "file_size": identity.size_bytes,
+        "manifest_version": MANIFEST_VERSION,
         "schema_version": SCHEMA_VERSION,
-        "sha256": identity.sha256,
-        "sealed_at_utc": sealed_at_utc,
+        "sealed_timestamp": sealed_at_utc,
         "tool_version": __version__,
     }
-    digest = hashlib.sha256(canonical_json_bytes(source)).hexdigest()
+
+
+def make_proof_id(identity: FileIdentity, sealed_at_utc: str) -> str:
+    digest = hashlib.sha256(canonical_json_bytes(proof_id_seed(identity, sealed_at_utc))).hexdigest()
     return f"tp_{digest[:32]}"
+
+
+def event_hash(event: dict[str, object]) -> str:
+    event_without_hash = {key: value for key, value in event.items() if key != "event_hash"}
+    return hashlib.sha256(canonical_json_bytes(event_without_hash)).hexdigest()
+
+
+def build_evidence_event(
+    *,
+    event_type: str,
+    timestamp: str,
+    actor: str,
+    file_sha256: str,
+    previous_event_hash: str,
+) -> dict[str, object]:
+    event: dict[str, object] = {
+        "actor": actor,
+        "event_type": event_type,
+        "file_sha256": file_sha256,
+        "previous_event_hash": previous_event_hash,
+        "timestamp": timestamp,
+    }
+    event["event_id"] = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "actor": actor,
+                "event_type": event_type,
+                "file_sha256": file_sha256,
+                "previous_event_hash": previous_event_hash,
+                "timestamp": timestamp,
+            }
+        )
+    ).hexdigest()
+    event["event_hash"] = event_hash(event)
+    return event
+
+
+def verify_evidence_chain(path: Path) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    previous_hash = GENESIS_EVENT_HASH
+    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            errors.append(f"event_{index}_invalid_json")
+            continue
+        if not isinstance(event, dict):
+            errors.append(f"event_{index}_not_object")
+            continue
+        required = {
+            "actor",
+            "event_id",
+            "event_type",
+            "timestamp",
+            "file_sha256",
+            "previous_event_hash",
+            "event_hash",
+        }
+        missing = sorted(required - set(event))
+        if missing:
+            errors.append(f"event_{index}_missing_{','.join(missing)}")
+            continue
+        if event["previous_event_hash"] != previous_hash:
+            errors.append(f"event_{index}_previous_hash_mismatch")
+        expected_hash = event_hash(event)
+        if event["event_hash"] != expected_hash:
+            errors.append(f"event_{index}_hash_mismatch")
+        previous_hash = str(event.get("event_hash"))
+    return not errors, errors
+
+
+def evidence_chain_diagnostics(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {
+            "status": CHAIN_STATUS_MISSING,
+            "path": str(path),
+            "errors": ["evidence_chain_missing"],
+            "event_count": 0,
+        }
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        ok, errors = verify_evidence_chain(path)
+    except OSError as exc:
+        return {
+            "status": CHAIN_STATUS_ERROR,
+            "path": str(path),
+            "errors": [str(exc)],
+            "event_count": 0,
+        }
+    event_count = sum(1 for line in lines if line.strip())
+    return {
+        "status": CHAIN_STATUS_VALID if ok else CHAIN_STATUS_INVALID,
+        "path": str(path),
+        "errors": errors,
+        "event_count": event_count,
+    }
 
 
 def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
@@ -55,6 +166,7 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
+        manifest_version=MANIFEST_VERSION,
         proof_id=make_proof_id(identity, sealed_at_utc),
         sealed_at_utc=sealed_at_utc,
         tool={"name": "tohupono", "version": __version__},
@@ -117,22 +229,13 @@ def create_proof_packet(
         hashes.append(f"blake3  {identity.blake3}")
     (output / "hashes.txt").write_text("\n".join(hashes) + "\n", encoding="utf-8")
     write_json(output / "metadata.json", identity.to_dict())
-    sealed_event = {
-        "event_id": hashlib.sha256(
-            canonical_json_bytes(
-                {
-                    "event_type": "sealed",
-                    "proof_id": manifest.proof_id,
-                    "sealed_at_utc": sealed_at,
-                    "sha256": identity.sha256,
-                }
-            )
-        ).hexdigest(),
-        "event_type": "sealed",
-        "proof_id": manifest.proof_id,
-        "recorded_at_utc": sealed_at,
-        "file_sha256": identity.sha256,
-    }
+    sealed_event = build_evidence_event(
+        event_type="sealed",
+        timestamp=sealed_at,
+        actor="tohupono",
+        file_sha256=identity.sha256,
+        previous_event_hash=GENESIS_EVENT_HASH,
+    )
     (output / "evidence_chain.jsonl").write_text(
         canonical_json_text(sealed_event) + "\n", encoding="utf-8"
     )
