@@ -21,16 +21,31 @@ class Blake3UnavailableError(TohuPonoError):
 class FileIdentity:
     path_observed: str
     name: str
+    extension: str
     size_bytes: int
     mime_observed: str
+    mime_guess: str
     sha256: str
     sha512: str
     blake3: str | None
     created_at_observed: float | None
     modified_at_observed: float | None
+    accessed_at_observed: float | None
+    metadata_trust_level: str = "untrusted_supporting_metadata"
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        value = asdict(self)
+        value.update(
+            {
+                "file_id": self.sha256,
+                "original_path": self.path_observed,
+                "filename": self.name,
+                "os_created_time": self.created_at_observed,
+                "os_modified_time": self.modified_at_observed,
+                "os_accessed_time": self.accessed_at_observed,
+            }
+        )
+        return value
 
 
 def _blake3_hasher():
@@ -96,11 +111,14 @@ def inspect_file(path: Path, include_blake3: bool = True) -> FileIdentity:
     return FileIdentity(
         path_observed=str(path),
         name=path.name,
+        extension=path.suffix,
         size_bytes=stat.st_size,
         mime_observed=detect_mime(path),
+        mime_guess=detect_mime(path),
         sha256=hash_file(path, "sha256"),
         sha512=hash_file(path, "sha512"),
         blake3=blake3_digest,
         created_at_observed=getattr(stat, "st_ctime", None),
         modified_at_observed=getattr(stat, "st_mtime", None),
+        accessed_at_observed=getattr(stat, "st_atime", None),
     )

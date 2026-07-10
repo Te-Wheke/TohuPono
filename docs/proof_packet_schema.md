@@ -4,6 +4,22 @@ MVP proof packets use `tohupono.proof_manifest.v0.1`.
 
 The manifest is written as canonical JSON using UTF-8, sorted keys, and stable separators. `proof_id` is deterministic and derived from canonical proof data.
 
+## v0.3.0 Development Notes
+
+The file object is byte-first. `file_id` is the SHA-256 digest of the source bytes. The object may also include original path, filename, extension, MIME guess, size, and OS timestamps, but those values are labelled as `untrusted_supporting_metadata`.
+
+Deterministic identifiers:
+
+- `file_id`: SHA-256 of file bytes.
+- `proof_id`: SHA-256 over stable proof fields, excluding unstable paths.
+- `manifest_id`: SHA-256 over the canonical manifest with signatures and self-referential packet IDs removed.
+- `event_id`: SHA-256 over previous event hash plus canonical event payload.
+- `packet_id`: SHA-256 over `manifest_id` plus evidence-chain root.
+
+Proof packet verification checks required files, manifest schema, reproducible IDs, evidence-chain hashes, manifest signature, optional report signature material, and local timestamp limitations. Missing external timestamp anchoring is a `WARN`, not a `FAIL`.
+
+`tohupono amend <packet> --note "..."` creates a separate amendment record beside the original packet. The original packet is not modified.
+
 ## v0.2.0 Development Notes
 
 `proof_id` is derived from canonical seed data:
@@ -12,7 +28,6 @@ The manifest is written as canonical JSON using UTF-8, sorted keys, and stable s
 - `tool_version`
 - `file_sha256`
 - `file_size`
-- `sealed_timestamp`
 - `manifest_version`
 
 The source file path, name, extension, and MIME type are observed metadata. They are not file identity. A copied or renamed file verifies when its byte digest matches the proof manifest.

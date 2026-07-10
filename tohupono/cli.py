@@ -9,7 +9,14 @@ from typing import Sequence
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_text
 from tohupono.core.file_identity import Blake3UnavailableError, TohuPonoError, hash_file, inspect_file
-from tohupono.core.proof import create_proof_packet, evidence_chain_diagnostics, load_manifest
+from tohupono.core.proof import (
+    create_amendment,
+    create_proof_packet,
+    evidence_chain_diagnostics,
+    load_manifest,
+    packet_diagnostics,
+    resolve_packet_manifest,
+)
 from tohupono.reporting.pro_report import generate_report
 from tohupono.trust.keys import KeyErrorWithAction
 from tohupono.verdicts.classifier import (
@@ -43,7 +50,9 @@ def _emit_error(code: str, message: str, *, json_mode: bool, exit_code: int) -> 
 
 
 def _missing_path_code(command: str, path_arg: str) -> str:
-    if command in {"verify", "report", "inspect-proof"} and "manifest" in path_arg.lower():
+    if command in {"verify", "verify-file", "report", "inspect-proof", "audit", "amend"} and (
+        "manifest" in path_arg.lower() or "packet" in path_arg.lower()
+    ):
         return "MISSING_PROOF"
     return "MISSING_FILE"
 
@@ -123,6 +132,66 @@ def _print_inspect_proof_human(result: dict[str, object]) -> None:
         print(f"- {artefact}")
 
 
+def _print_packet_checks(result: dict[str, object]) -> None:
+    for check in result.get("checks", []):
+        if isinstance(check, dict):
+            print(f"{check.get('status')}: {check.get('message')}")
+
+
+def _print_verify_file_human(result: object) -> None:
+    verdict = getattr(result, "verdict")
+    if verdict == VERIFIED_INTEGRITY:
+        print("PASS: file hash matches manifest.")
+        print("PASS: file_id matches.")
+        for warning in getattr(result, "warnings"):
+            print(f"WARN: {warning}")
+        for note in getattr(result, "notes"):
+            if "path differs" in note.lower():
+                print("WARN: current path differs from original recorded path.")
+            print(f"NOTE: {note}")
+        print("NOTE: copy or rename does not weaken byte-level proof.")
+    else:
+        for reason in getattr(result, "reasons"):
+            print(f"FAIL: {reason}")
+        print("FAIL: file hash does not match manifest.")
+        print("FAIL: file_id mismatch.")
+
+
+def _compare_files(file_a: Path, file_b: Path) -> dict[str, object]:
+    a = inspect_file(file_a, include_blake3=False)
+    b = inspect_file(file_b, include_blake3=False)
+    same = a.sha256 == b.sha256
+    return {
+        "conclusion": "files are byte-identical" if same else "files are not byte-identical",
+        "file_a": {"path": str(file_a), "sha256": a.sha256, "size_bytes": a.size_bytes},
+        "file_b": {"path": str(file_b), "sha256": b.sha256, "size_bytes": b.size_bytes},
+        "file_id_same": same,
+        "paths_differ": str(file_a) != str(file_b),
+        "status": "MATCH" if same else "DIFFERENT",
+    }
+
+
+def _print_compare_human(result: dict[str, object]) -> None:
+    print(str(result["status"]))
+    a = result["file_a"]
+    b = result["file_b"]
+    if isinstance(a, dict) and isinstance(b, dict):
+        print(f"File A SHA-256: {a['sha256']}")
+        print(f"File A size: {a['size_bytes']}")
+        print(f"File B SHA-256: {b['sha256']}")
+        print(f"File B size: {b['size_bytes']}")
+    print(f"file_id same: {result['file_id_same']}")
+    print(f"paths differ: {result['paths_differ']}")
+    if result["file_id_same"]:
+        print("PASS: files are byte-identical.")
+        print("PASS: file_id matches.")
+        print("NOTE: differing names or paths do not weaken byte-level integrity.")
+    else:
+        print("FAIL: files are not byte-identical.")
+        print("FAIL: file_id differs.")
+    print(f"Conclusion: {result['conclusion']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tohupono", description="Local-first file-origin proof tooling.")
     parser.add_argument("--version", action="version", version=__version__)
@@ -137,14 +206,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     prove_cmd = sub.add_parser("prove", help="Create a proof packet.")
     prove_cmd.add_argument("file")
-    prove_cmd.add_argument("--output", required=True)
+    prove_cmd.add_argument("--output", default="proof_packet")
     prove_cmd.add_argument("--include-payload", action="store_true")
 
-    verify_cmd = sub.add_parser("verify", help="Verify a file against a proof manifest.")
-    verify_cmd.add_argument("file")
-    verify_cmd.add_argument("--proof", required=True)
+    verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
+    verify_cmd.add_argument("target")
+    verify_cmd.add_argument("--proof")
     verify_cmd.add_argument("--output")
     verify_cmd.add_argument("--json", action="store_true")
+
+    verify_file_cmd = sub.add_parser("verify-file", help="Verify a file against a proof packet.")
+    verify_file_cmd.add_argument("file")
+    verify_file_cmd.add_argument("packet")
+    verify_file_cmd.add_argument("--json", action="store_true")
 
     verify_chain_cmd = sub.add_parser("verify-chain", help="Verify an evidence chain JSONL file.")
     verify_chain_cmd.add_argument("evidence_chain")
@@ -153,6 +227,20 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_proof_cmd = sub.add_parser("inspect-proof", help="Inspect a proof manifest without a source file.")
     inspect_proof_cmd.add_argument("manifest")
     inspect_proof_cmd.add_argument("--json", action="store_true")
+
+    compare_cmd = sub.add_parser("compare", help="Compare two files by byte digest.")
+    compare_cmd.add_argument("file_a")
+    compare_cmd.add_argument("file_b")
+    compare_cmd.add_argument("--json", action="store_true")
+
+    amend_cmd = sub.add_parser("amend", help="Create an amendment packet without mutating the original.")
+    amend_cmd.add_argument("packet")
+    amend_cmd.add_argument("--note", required=True)
+    amend_cmd.add_argument("--json", action="store_true")
+
+    audit_cmd = sub.add_parser("audit", help="Produce a technical proof packet audit.")
+    audit_cmd.add_argument("packet")
+    audit_cmd.add_argument("--json", action="store_true")
 
     report_cmd = sub.add_parser("report", help="Generate a signed PDF report.")
     report_cmd.add_argument("--proof", required=True)
@@ -184,12 +272,37 @@ def run(argv: Sequence[str] | None = None) -> int:
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
         elif args.command == "verify":
-            result = verify_file(Path(args.file), Path(args.proof))
-            write_verdict(Path(args.proof), result)
+            if args.proof:
+                result = verify_file(Path(args.target), Path(args.proof))
+                write_verdict(Path(args.proof), result)
+                if args.output:
+                    write_markdown(Path(args.output), result)
+                _print_json(result.to_cli_json() if args.json else result.to_dict())
+                return EXIT_SUCCESS if result.verdict == VERIFIED_INTEGRITY else EXIT_VERIFICATION_FAILED
+            packet_result = packet_diagnostics(Path(args.target))
             if args.output:
-                write_markdown(Path(args.output), result)
-            _print_json(result.to_cli_json() if args.json else result.to_dict())
+                Path(args.output).write_text(canonical_json_text(packet_result) + "\n", encoding="utf-8")
+            if args.json:
+                _print_json(packet_result)
+            else:
+                _print_packet_checks(packet_result)
+            return EXIT_SUCCESS if packet_result["status"] != "fail" else EXIT_VERIFICATION_FAILED
+        elif args.command == "verify-file":
+            manifest_path = resolve_packet_manifest(Path(args.packet))
+            result = verify_file(Path(args.file), manifest_path)
+            write_verdict(manifest_path, result)
+            if args.json:
+                _print_json(result.to_cli_json())
+            else:
+                _print_verify_file_human(result)
             return EXIT_SUCCESS if result.verdict == VERIFIED_INTEGRITY else EXIT_VERIFICATION_FAILED
+        elif args.command == "compare":
+            result = _compare_files(Path(args.file_a), Path(args.file_b))
+            if args.json:
+                _print_json(result)
+            else:
+                _print_compare_human(result)
+            return EXIT_SUCCESS if result["file_id_same"] else EXIT_VERIFICATION_FAILED
         elif args.command == "verify-chain":
             result = evidence_chain_diagnostics(Path(args.evidence_chain))
             if args.json:
@@ -211,6 +324,22 @@ def run(argv: Sequence[str] | None = None) -> int:
             else:
                 _print_inspect_proof_human(result)
             return EXIT_SUCCESS
+        elif args.command == "amend":
+            out = create_amendment(Path(args.packet), args.note)
+            result = {"amendment": str(out), "status": "created"}
+            if args.json:
+                _print_json(result)
+            else:
+                print(f"PASS: amendment packet created at {out}")
+                print("PASS: original packet was not modified.")
+            return EXIT_SUCCESS
+        elif args.command == "audit":
+            result = packet_diagnostics(Path(args.packet))
+            if args.json:
+                _print_json(result)
+            else:
+                _print_packet_checks(result)
+            return EXIT_SUCCESS if result["status"] != "fail" else EXIT_VERIFICATION_FAILED
         elif args.command == "report":
             sig_path = generate_report(
                 proof=Path(args.proof),

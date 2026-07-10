@@ -18,6 +18,7 @@ from tohupono.core.proof import (
     event_hash,
     load_manifest,
     make_proof_id,
+    packet_diagnostics,
     verify_evidence_chain,
 )
 from tohupono.reporting.pro_report import COMMUNITY_TEXT, FORBIDDEN_LANGUAGE, generate_report
@@ -50,7 +51,19 @@ def test_cli_help() -> None:
     result = run_cli("--help")
     assert result.returncode == 0
     assert "tohupono" in result.stdout
-    for command in ["inspect", "hash", "prove", "verify", "verify-chain", "inspect-proof", "report"]:
+    for command in [
+        "inspect",
+        "hash",
+        "prove",
+        "verify",
+        "verify-file",
+        "verify-chain",
+        "inspect-proof",
+        "compare",
+        "amend",
+        "audit",
+        "report",
+    ]:
         assert command in result.stdout
 
 
@@ -612,3 +625,215 @@ def test_modified_source_bytes_still_altered_after_proof_with_valid_signature(tm
     assert result.returncode == 1
     assert data["verdict"] == ALTERED_AFTER_PROOF
     assert data["manifest_signature_status"] == "valid"
+
+
+def test_v030_universal_file_object_fields(tmp_path: Path) -> None:
+    sample = tmp_path / "photo_like.png"
+    sample.write_bytes(b"\x89PNG\r\n\x1a\nnot really an image")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    manifest = load_manifest(proof_dir / "manifest.json")
+    file_info = manifest["file"]
+    assert file_info["file_id"] == file_info["sha256"]
+    assert file_info["original_path"] == str(sample)
+    assert file_info["filename"] == "photo_like.png"
+    assert file_info["extension"] == ".png"
+    assert file_info["metadata_trust_level"] == "untrusted_supporting_metadata"
+    assert "os_created_time" in file_info
+    assert "os_modified_time" in file_info
+    assert "os_accessed_time" in file_info
+
+
+def test_v030_empty_binary_video_and_unicode_names_prove(tmp_path: Path) -> None:
+    cases = {
+        "empty": b"",
+        "binary.bin": bytes(range(32)),
+        "clip.mp4": b"\x00\x00\x00\x18ftypmp42",
+        "taonga_\u0101hua.dat": b"unicode filename bytes",
+    }
+    for name, payload in cases.items():
+        sample = tmp_path / name
+        sample.write_bytes(payload)
+        proof_dir = tmp_path / f"{name}_proof"
+        create_proof_packet(sample, proof_dir)
+        result = verify_file(sample, proof_dir / "manifest.json")
+        assert result.verdict == VERIFIED_INTEGRITY
+
+
+def test_v030_compare_command_reports_match_and_difference(tmp_path: Path) -> None:
+    one = tmp_path / "one.txt"
+    copied = tmp_path / "copied.txt"
+    changed = tmp_path / "changed.txt"
+    one.write_bytes(b"same")
+    copied.write_bytes(b"same")
+    changed.write_bytes(b"different")
+    match = run_cli("compare", str(one), str(copied), "--json")
+    assert match.returncode == 0, match.stderr
+    match_data = json.loads(match.stdout)
+    assert match_data["status"] == "MATCH"
+    assert match_data["file_id_same"] is True
+    different = run_cli("compare", str(one), str(changed))
+    assert different.returncode == 1
+    assert "FAIL: files are not byte-identical." in different.stdout
+
+
+def test_v030_verify_file_accepts_copied_and_renamed_files(tmp_path: Path) -> None:
+    original = tmp_path / "source.log"
+    renamed = tmp_path / "renamed.archive"
+    copied = tmp_path / "nested" / "copy"
+    copied.parent.mkdir()
+    original.write_bytes(b"custody bytes")
+    renamed.write_bytes(original.read_bytes())
+    copied.write_bytes(original.read_bytes())
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(original, proof_dir)
+    for candidate in [renamed, copied]:
+        result = run_cli("verify-file", str(candidate), str(proof_dir), "--json")
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        assert data["verdict"] == VERIFIED_INTEGRITY
+        assert PATH_DIFFERS_NOTE in data["notes"]
+    human = run_cli("verify-file", str(renamed), str(proof_dir))
+    assert "PASS: file hash matches manifest." in human.stdout
+    assert "WARN: current path differs from original recorded path." in human.stdout
+
+
+def test_v030_verify_file_rejects_modified_file(tmp_path: Path) -> None:
+    original = tmp_path / "source.txt"
+    changed = tmp_path / "changed.txt"
+    original.write_bytes(b"original")
+    changed.write_bytes(b"changed")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(original, proof_dir)
+    result = run_cli("verify-file", str(changed), str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["verdict"] == ALTERED_AFTER_PROOF
+
+
+def test_v030_packet_verify_detects_manifest_and_chain_tampering(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_bytes(b"packet")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    ok = run_cli("verify", str(proof_dir), "--json")
+    assert ok.returncode == 0, ok.stderr
+    assert json.loads(ok.stdout)["status"] == "warn"
+
+    manifest_path = proof_dir / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    manifest["tool"]["version"] = "tampered"
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    tampered_manifest = run_cli("verify", str(proof_dir), "--json")
+    assert tampered_manifest.returncode == 1
+    assert "manifest_id_mismatch" in json.loads(tampered_manifest.stdout)["failures"]
+
+    create_proof_packet(sample, tmp_path / "proof_packet_chain")
+    chain_dir = tmp_path / "proof_packet_chain"
+    event = json.loads((chain_dir / "evidence_chain.jsonl").read_text(encoding="utf-8"))
+    event["actor"] = "edited"
+    (chain_dir / "evidence_chain.jsonl").write_text(canonical_json_text(event) + "\n", encoding="utf-8")
+    tampered_chain = run_cli("verify", str(chain_dir), "--json")
+    assert tampered_chain.returncode == 1
+    assert "event_1_hash_mismatch" in json.loads(tampered_chain.stdout)["failures"]
+
+
+def test_v030_empty_evidence_chain_is_invalid(tmp_path: Path) -> None:
+    chain = tmp_path / "evidence_chain.jsonl"
+    chain.write_text("\n\n", encoding="utf-8")
+    ok, errors = verify_evidence_chain(chain)
+    assert not ok
+    assert "evidence_chain_empty" in errors
+    assert evidence_chain_diagnostics(chain)["status"] == "invalid"
+
+
+def test_v030_report_signature_mismatch_fails_packet_diagnostics(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("report\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    report = proof_dir / "verification_report.pdf"
+    key = tmp_path / "keys" / "report_signing_key.pem"
+    generate_report(proof_dir / "manifest.json", report, key)
+    report.write_bytes(report.read_bytes() + b"tamper")
+    result = packet_diagnostics(proof_dir)
+    assert result["report_signature_status"] == "invalid"
+    assert "report_signature_invalid" in result["failures"]
+
+
+def test_v030_packet_overwrite_refused(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("overwrite\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    first = run_cli("prove", str(sample), "--output", str(proof_dir))
+    assert first.returncode == 0, first.stderr
+    second = run_cli("prove", str(sample), "--output", str(proof_dir))
+    assert second.returncode == 2
+    assert "Refusing to overwrite existing proof packet" in second.stderr
+
+
+def test_v030_amendment_does_not_mutate_original_packet(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("amend\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    before = {
+        path.relative_to(proof_dir): hash_file(path, "sha256")
+        for path in proof_dir.rglob("*")
+        if path.is_file()
+    }
+    result = run_cli("amend", str(proof_dir), "--note", "clarify custody", "--json")
+    assert result.returncode == 0, result.stderr
+    after = {
+        path.relative_to(proof_dir): hash_file(path, "sha256")
+        for path in proof_dir.rglob("*")
+        if path.is_file()
+    }
+    assert before == after
+    amendment_dir = Path(json.loads(result.stdout)["amendment"])
+    assert (amendment_dir / "amendment.json").exists()
+    amendment = json.loads((amendment_dir / "amendment.json").read_text(encoding="utf-8"))
+    assert amendment["parent_packet_id"]
+    assert amendment["note"] == "clarify custody"
+
+
+def test_v030_deterministic_ids_reproduce_with_same_inputs(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_bytes(b"stable")
+    first = tmp_path / "first_packet"
+    second = tmp_path / "second_packet"
+    sealed_at = "2026-07-10T00:00:00Z"
+    create_proof_packet(sample, first, sealed_at_utc=sealed_at)
+    create_proof_packet(sample, second, sealed_at_utc=sealed_at)
+    first_manifest = load_manifest(first / "manifest.json")
+    second_manifest = load_manifest(second / "manifest.json")
+    assert first_manifest["proof_id"] == second_manifest["proof_id"]
+    assert first_manifest["identifiers"] == second_manifest["identifiers"]
+
+
+def test_v030_changed_digest_changes_deterministic_ids(tmp_path: Path) -> None:
+    one = tmp_path / "one.txt"
+    two = tmp_path / "two.txt"
+    one.write_bytes(b"one")
+    two.write_bytes(b"two")
+    sealed_at = "2026-07-10T00:00:00Z"
+    one_dir = tmp_path / "one_packet"
+    two_dir = tmp_path / "two_packet"
+    create_proof_packet(one, one_dir, sealed_at_utc=sealed_at)
+    create_proof_packet(two, two_dir, sealed_at_utc=sealed_at)
+    one_ids = load_manifest(one_dir / "manifest.json")["identifiers"]
+    two_ids = load_manifest(two_dir / "manifest.json")["identifiers"]
+    assert one_ids["file_id"] != two_ids["file_id"]
+    assert one_ids["proof_id"] != two_ids["proof_id"]
+    assert one_ids["manifest_id"] != two_ids["manifest_id"]
+    assert one_ids["packet_id"] != two_ids["packet_id"]
+
+
+def test_v030_audit_command_reports_pass_warn_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("audit\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("audit", str(proof_dir))
+    assert result.returncode == 0
+    assert "PASS: manifest schema valid." in result.stdout
+    assert "WARN: timestamp is local-only and not externally anchored." in result.stdout

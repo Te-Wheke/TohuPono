@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Added universal-file proof fields with `file_id` equal to the SHA-256 byte digest.
+- Added deterministic `manifest_id`, `packet_id`, and event ID checks.
+- Added packet-level `verify <packet>` diagnostics.
+- Added explicit `verify-file <file> <packet>` verification for copied and renamed files.
+- Added `compare <file-a> <file-b>` byte-digest comparison.
+- Added immutable amendment packet creation with `amend <packet> --note`.
+- Added `audit <packet>` technical PASS, WARN, and FAIL diagnostics.
+- Refused proof packet overwrite by default.
+- Marked filesystem metadata as untrusted supporting metadata.
+- Added tests for empty, binary, media-like, Unicode, copied, renamed, modified, tampered, amendment, overwrite, and deterministic-ID cases.
+
 ## v0.2.0 - 2026-07-10
 
 - Hardened manifest signing and verification for proof packet tamper evidence.

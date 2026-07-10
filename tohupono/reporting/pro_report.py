@@ -9,7 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from tohupono.core.proof import load_manifest
-from tohupono.trust.keys import sign_bytes
+from tohupono.trust.keys import export_public_key, sign_bytes
 from tohupono.verdicts.classifier import manifest_signature_status
 from tohupono.core.proof import verify_evidence_chain
 
@@ -110,4 +110,5 @@ def generate_report(
     signature = sign_bytes(report_key, output.read_bytes())
     sig_path = output.with_name(output.name + ".sig")
     sig_path.write_bytes(signature)
+    export_public_key(report_key, output.with_name(output.name + ".pub"))
     return sig_path

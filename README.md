@@ -12,10 +12,15 @@ python -m tohupono --version
 tohupono inspect ./file.pdf
 tohupono hash ./file.pdf --algorithm sha256
 tohupono prove ./file.pdf --output proof_packet/
+tohupono compare ./file.pdf ./copy.pdf
+tohupono verify proof_packet/
+tohupono verify-file ./copy.pdf proof_packet/
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --output verification_report.md
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --json
 tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 tohupono inspect-proof proof_packet/manifest.json --json
+tohupono amend proof_packet/ --note "Custody note"
+tohupono audit proof_packet/
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -41,13 +46,27 @@ proof_packet/signatures/manifest.pub
 
 The manifest signature protects the proof packet before the PDF report layer. The PDF report signature is separate and protects the human-readable report file.
 
+## v0.3.0 Development Goals
+
+The v0.3.0 cycle makes the proof core universal-file and byte-first.
+
+- `file_id` is the SHA-256 digest of file bytes.
+- `proof_id`, `manifest_id`, `event_id`, and `packet_id` are deterministic hashes over canonical proof data.
+- Paths, filenames, extensions, MIME guesses, and OS timestamps are untrusted supporting metadata.
+- Copied and renamed files pass byte-level verification when SHA-256 matches.
+- `compare` checks two files by digest.
+- `verify-file` explicitly verifies a file against a packet.
+- `verify` without `--proof` verifies the packet itself.
+- `amend` creates a separate amendment record and does not mutate the original packet.
+- `audit` prints technical packet checks using PASS, WARN, and FAIL lines.
+
 ## v0.2.0 Development Goals
 
 The v0.2.0 cycle hardens deterministic proof lineage for any file type.
 
 - File identity is the byte digest. Path, name, extension, and MIME type are observed metadata only.
 - Copied or renamed files verify when their byte digest matches the proof manifest.
-- Proof IDs are derived from canonical seed data: schema version, tool version, file SHA-256, file size, sealed timestamp, and manifest version.
+- Proof IDs are derived from stable canonical seed data: schema version, tool version, file SHA-256, file size, and manifest version.
 - `evidence_chain.jsonl` events include canonical event hashes and previous-event links.
 - Manifest keys sign proof manifests. Report keys sign final PDF bytes. These keys must remain separate.
 - `verify --json` emits deterministic structured diagnostics for automation.
