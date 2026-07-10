@@ -18,7 +18,16 @@ from tohupono.core.proof import (
     resolve_packet_manifest,
 )
 from tohupono.reporting.pro_report import generate_report
-from tohupono.trust.keys import KeyErrorWithAction
+from tohupono.trust.keys import (
+    KeyConflictError,
+    KeyErrorWithAction,
+    check_keys,
+    create_key,
+    inspect_keys,
+    key_purpose_names,
+    mark_key_compromised,
+    rotate_key,
+)
 from tohupono.verdicts.classifier import (
     VERIFIED_INTEGRITY,
     manifest_signature_status,
@@ -192,6 +201,64 @@ def _print_compare_human(result: dict[str, object]) -> None:
     print(f"Conclusion: {result['conclusion']}")
 
 
+def _print_key_inspect_human(result: dict[str, object]) -> None:
+    for item in result.get("keys", []):
+        if not isinstance(item, dict):
+            continue
+        print(f"Purpose: {item['purpose']}")
+        print(f"Private key path: {item['private_key_path']}")
+        print(f"Private key exists: {'yes' if item['private_key_exists'] else 'no'}")
+        print(f"Public key path: {item['public_key_path']}")
+        print(f"Public key exists: {'yes' if item['public_key_exists'] else 'no'}")
+        print(f"Allowed operations: {', '.join(item['allowed_operations'])}")
+        print(f"Rotation events: {item.get('rotation_events', item.get('rotation_event_count', 0))}")
+        print(f"Compromise events: {item.get('compromise_events', item.get('compromise_event_count', 0))}")
+        print(f"Status: {item['status']}")
+        warnings = item.get("warnings") or []
+        if warnings:
+            print("Warnings:")
+            for warning in warnings:
+                print(f"WARN: {warning}")
+        print("")
+
+
+def _print_key_check_human(result: dict[str, object]) -> None:
+    print(f"OpenSSL available: {'yes' if result.get('openssl_available') else 'no'}")
+    print(f"Status: {result.get('status')}")
+    for item in result.get("keys", []):
+        if not isinstance(item, dict):
+            continue
+        print(f"Purpose: {item['purpose']}")
+        print(f"Rotation events: {item.get('rotation_events', item.get('rotation_event_count', 0))}")
+        print(f"Compromise events: {item.get('compromise_events', item.get('compromise_event_count', 0))}")
+        print(f"Status: {item['status']}")
+        for warning in item.get("warnings") or []:
+            print(f"WARN: {warning}")
+        for failure in item.get("failures") or []:
+            print(f"FAIL: {failure}")
+        print("")
+
+
+def _print_key_lifecycle_human(result: dict[str, object], action: str) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Purpose: {result.get('purpose')}")
+    if action == "create":
+        print(f"Private key path: {result.get('private_key_path')}")
+        print(f"Public key path: {result.get('public_key_path')}")
+    elif action == "rotate":
+        print(f"Old public key path: {result.get('old_public_key_path')}")
+        print(f"New private key path: {result.get('new_private_key_path')}")
+        print(f"New public key path: {result.get('new_public_key_path')}")
+        print(f"Rotation log path: {result.get('rotation_log_path')}")
+        print(f"Rotation event ID: {result.get('rotation_event_id')}")
+    elif action == "compromise":
+        print(f"Public key path: {result.get('public_key_path')}")
+        print(f"Compromise log path: {result.get('compromise_log_path')}")
+        print(f"Compromise event ID: {result.get('compromise_event_id')}")
+    for warning in result.get("warnings") or []:
+        print(f"WARN: {warning}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tohupono", description="Local-first file-origin proof tooling.")
     parser.add_argument("--version", action="version", version=__version__)
@@ -240,7 +307,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_cmd = sub.add_parser("audit", help="Produce a technical proof packet audit.")
     audit_cmd.add_argument("packet")
+    audit_cmd.add_argument("--key-workspace")
     audit_cmd.add_argument("--json", action="store_true")
+
+    key_cmd = sub.add_parser("key", help="Manage local key purposes and lifecycle metadata.")
+    key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
+    key_inspect_cmd = key_sub.add_parser("inspect", help="Inspect configured key purposes.")
+    key_inspect_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_inspect_cmd.add_argument("--output-dir")
+    key_inspect_cmd.add_argument("--json", action="store_true")
+    key_check_cmd = key_sub.add_parser("check", help="Check local key hygiene.")
+    key_check_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_check_cmd.add_argument("--output-dir")
+    key_check_cmd.add_argument("--json", action="store_true")
+    key_create_cmd = key_sub.add_parser("create", help="Create a local Ed25519 keypair for a purpose.")
+    key_create_cmd.add_argument("--purpose", required=True, choices=key_purpose_names())
+    key_create_cmd.add_argument("--output-dir")
+    key_create_cmd.add_argument("--force", action="store_true")
+    key_create_cmd.add_argument("--json", action="store_true")
+    key_rotate_cmd = key_sub.add_parser("rotate", help="Rotate key material and record local metadata.")
+    key_rotate_cmd.add_argument("--purpose", required=True, choices=key_purpose_names())
+    key_rotate_cmd.add_argument("--reason", required=True)
+    key_rotate_cmd.add_argument("--output-dir")
+    key_rotate_cmd.add_argument("--json", action="store_true")
+    key_compromise_cmd = key_sub.add_parser("compromise", help="Record local key compromise metadata.")
+    key_compromise_cmd.add_argument("--purpose", required=True, choices=key_purpose_names())
+    key_compromise_cmd.add_argument("--reason", required=True)
+    key_compromise_cmd.add_argument("--output-dir")
+    key_compromise_cmd.add_argument("--json", action="store_true")
 
     report_cmd = sub.add_parser("report", help="Generate a signed PDF report.")
     report_cmd.add_argument("--proof", required=True)
@@ -334,12 +428,55 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print("PASS: original packet was not modified.")
             return EXIT_SUCCESS
         elif args.command == "audit":
-            result = packet_diagnostics(Path(args.packet))
+            key_workspace = Path(args.key_workspace) if args.key_workspace else None
+            result = packet_diagnostics(Path(args.packet), key_workspace=key_workspace)
             if args.json:
                 _print_json(result)
             else:
                 _print_packet_checks(result)
             return EXIT_SUCCESS if result["status"] != "fail" else EXIT_VERIFICATION_FAILED
+        elif args.command == "key":
+            if args.key_command == "inspect":
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = inspect_keys(args.purpose, output_dir=output_dir)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_inspect_human(result)
+                return EXIT_SUCCESS
+            if args.key_command == "check":
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = check_keys(args.purpose, output_dir=output_dir)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_check_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            if args.key_command == "create":
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = create_key(args.purpose, output_dir=output_dir, force=args.force)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_lifecycle_human(result, "create")
+                return EXIT_SUCCESS
+            if args.key_command == "rotate":
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = rotate_key(args.purpose, args.reason, output_dir=output_dir)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_lifecycle_human(result, "rotate")
+                return EXIT_SUCCESS
+            if args.key_command == "compromise":
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = mark_key_compromised(args.purpose, args.reason, output_dir=output_dir)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_lifecycle_human(result, "compromise")
+                return EXIT_SUCCESS
+            parser.error("Unknown key command")
         elif args.command == "report":
             sig_path = generate_report(
                 proof=Path(args.proof),
@@ -367,6 +504,8 @@ def run(argv: Sequence[str] | None = None) -> int:
         return _emit_error("INVALID_ARGUMENT", str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
     except ValueError as exc:
         return _emit_error("INVALID_ARGUMENT", str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
+    except KeyConflictError as exc:
+        return _emit_error("KEY_EXISTS", str(exc), json_mode=_json_mode(args), exit_code=EXIT_VERIFICATION_FAILED)
     except KeyErrorWithAction as exc:
         return _emit_error("SIGNATURE_ERROR", str(exc), json_mode=_json_mode(args), exit_code=EXIT_INTERNAL_ERROR)
     except Exception as exc:

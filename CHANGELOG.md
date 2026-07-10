@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.4.0 - 2026-07-10
+
+- Added key purpose registry entries for manifest, report, witness, amendment, release, and test purposes.
+- Added `tohupono key inspect` for human and JSON key purpose inspection.
+- Added `tohupono key check` for local key hygiene diagnostics.
+- Added `tohupono key create` for local OpenSSL Ed25519 keypair creation by purpose.
+- Added `tohupono key rotate` with JSONL rotation metadata and no old-key deletion.
+- Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
+- Added key lifecycle JSON output for rotation and compromise summaries.
+- Added `--output-dir` support to `key inspect` and `key check` for workspace-aware key diagnostics.
+- Added rotation metadata and compromise metadata records for local key lifecycle review.
+- Kept compromise warnings as `WARN`, not `FAIL`, so trust-policy review does not automatically destroy old proofs.
+- Added packet audit WARN output for local compromised-key metadata where visible.
+- Added `audit --key-workspace` to read key lifecycle metadata from an explicit workspace.
+- Added audit JSON key lifecycle fields for selected key workspaces.
+- Added a v0.4.0 release checklist for key-management hardening gates.
+- Documented key management, key rotation, and key compromise handling.
+- Kept OpenSSL CLI Ed25519 signing and existing default key paths.
+
 ## v0.3.0 - 2026-07-10
 
 - Added a universal byte-first file object model with `file_id` equal to the SHA-256 byte digest.

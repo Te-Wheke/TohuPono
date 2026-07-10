@@ -1,5 +1,18 @@
 # Roadmap
 
+## v0.4.0
+
+- key purpose registry;
+- key inspection and hygiene checks;
+- local key creation by explicit purpose;
+- key rotation metadata without deleting old keys;
+- key compromise metadata with WARN-level trust-policy review prompts;
+- key workspace-aware inspect/check commands;
+- packet audit warnings for visible compromised-key metadata;
+- audit key-workspace selection for lifecycle warning review;
+- v0.4.0 release checklist for key-management gates;
+- continued separation of manifest, report, amendment, witness, release, and test key purposes.
+
 ## v0.3.0
 
 - universal byte-first file proof model;

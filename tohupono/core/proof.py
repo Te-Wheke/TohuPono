@@ -11,10 +11,15 @@ from typing import Any, Literal
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
-from tohupono.trust.keys import DEFAULT_MANIFEST_KEY, DEFAULT_MANIFEST_PUBLIC_KEY, sign_manifest_bytes
+from tohupono.trust.keys import (
+    DEFAULT_MANIFEST_KEY,
+    DEFAULT_MANIFEST_PUBLIC_KEY,
+    sign_amendment_bytes,
+    sign_manifest_bytes,
+)
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
-MANIFEST_VERSION = "0.3.0"
+MANIFEST_VERSION = "0.4.0"
 GENESIS_EVENT_HASH = "GENESIS"
 CHAIN_STATUS_VALID = "valid"
 CHAIN_STATUS_MISSING = "missing"
@@ -341,7 +346,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def packet_diagnostics(packet: Path) -> dict[str, Any]:
+def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
     manifest_path = resolve_packet_manifest(packet)
     proof_dir = manifest_path.parent
     checks: list[dict[str, str]] = []
@@ -425,6 +430,27 @@ def packet_diagnostics(packet: Path) -> dict[str, Any]:
         checks.append({"status": "FAIL", "message": "report signature invalid."})
         failures.append("report_signature_invalid")
 
+    from tohupono.trust.keys import key_lifecycle_summary
+
+    key_lifecycle: dict[str, object] = {}
+    key_warnings: list[str] = []
+    for purpose in ["manifest", "report", "amendment"]:
+        lifecycle = key_lifecycle_summary(purpose, key_workspace)
+        key_lifecycle[purpose] = {
+            "compromise_events": lifecycle.get("compromise_events", 0),
+            "latest_compromise_event_id": lifecycle.get("latest_compromise_event_id"),
+            "latest_rotation_event_id": lifecycle.get("latest_rotation_event_id"),
+            "rotation_events": lifecycle.get("rotation_events", 0),
+        }
+        if int(lifecycle.get("compromise_events", 0)):
+            message = (
+                f"compromise metadata exists for the {purpose} key purpose. "
+                "Existing signatures may require review under the applicable trust policy."
+            )
+            checks.append({"status": "WARN", "message": message})
+            key_warnings.append(message)
+            warnings.append(f"{purpose}_key_compromise_review")
+
     checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
     warnings.append("timestamp_local_only")
     status = "fail" if failures else ("warn" if warnings else "pass")
@@ -432,6 +458,9 @@ def packet_diagnostics(packet: Path) -> dict[str, Any]:
         "checks": checks,
         "evidence_chain_status": chain["status"],
         "failures": failures,
+        "key_lifecycle": key_lifecycle,
+        "key_warnings": key_warnings,
+        "key_workspace": str(key_workspace or Path("keys")),
         "manifest_id": identifiers.get("manifest_id"),
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,
@@ -498,7 +527,7 @@ def create_amendment(packet: Path, note: str) -> Path:
     _assert_can_create_packet(out_dir)
     out_dir.mkdir(parents=True)
     write_json(out_dir / "amendment.json", amendment)
-    signature, public_key = sign_manifest_bytes(canonical_json_bytes(amendment))
+    signature, public_key = sign_amendment_bytes(canonical_json_bytes(amendment))
     sig_dir = out_dir / "signatures"
     sig_dir.mkdir()
     (sig_dir / "amendment.sig").write_bytes(signature)
