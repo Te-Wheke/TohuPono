@@ -1,17 +1,22 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 - 2026-07-10
 
-- Added universal-file proof fields with `file_id` equal to the SHA-256 byte digest.
-- Added deterministic `manifest_id`, `packet_id`, and event ID checks.
-- Added packet-level `verify <packet>` diagnostics.
-- Added explicit `verify-file <file> <packet>` verification for copied and renamed files.
-- Added `compare <file-a> <file-b>` byte-digest comparison.
-- Added immutable amendment packet creation with `amend <packet> --note`.
-- Added `audit <packet>` technical PASS, WARN, and FAIL diagnostics.
+- Added a universal byte-first file object model with `file_id` equal to the SHA-256 byte digest.
+- Added deterministic file, proof, manifest, event, and packet identifiers.
 - Refused proof packet overwrite by default.
-- Marked filesystem metadata as untrusted supporting metadata.
-- Added tests for empty, binary, media-like, Unicode, copied, renamed, modified, tampered, amendment, overwrite, and deterministic-ID cases.
+- Added copied and renamed file verification by byte digest.
+- Added `compare <file-a> <file-b>` byte-digest comparison.
+- Added explicit `verify-file <file> <packet>` verification.
+- Added packet-only `verify <packet>` diagnostics.
+- Added amendment lineage with `amend <packet> --note` without mutating original packets.
+- Added `audit <packet>` technical packet diagnostics.
+- Strengthened PASS, WARN, and FAIL verification output.
+- Added local timestamp warning behavior for offline proof packets.
+- Improved report signature verification material for packet diagnostics.
+- Added claim maturity governance for high-risk evidence and legal language.
+- Framed proof-of-reality as a layered maturity target, not a current product claim.
+- Split the growing MVP test file into focused test suites.
 
 ## v0.2.0 - 2026-07-10
 

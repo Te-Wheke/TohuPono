@@ -33,7 +33,7 @@ from tests.support import run_cli
 
 
 def test_package_imports() -> None:
-    assert tohupono.__version__ == "0.2.0"
+    assert tohupono.__version__ == "0.3.0"
 
 def test_cli_help() -> None:
     result = run_cli("--help")
