@@ -14,7 +14,7 @@ from tohupono.core.file_identity import FileIdentity, inspect_file
 from tohupono.trust.keys import DEFAULT_MANIFEST_KEY, DEFAULT_MANIFEST_PUBLIC_KEY, sign_manifest_bytes
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
-MANIFEST_VERSION = "0.2.0-dev"
+MANIFEST_VERSION = "0.2.0"
 GENESIS_EVENT_HASH = "GENESIS"
 CHAIN_STATUS_VALID = "valid"
 CHAIN_STATUS_MISSING = "missing"

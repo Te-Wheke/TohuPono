@@ -12,7 +12,7 @@
 - Confirm altered file returns `ALTERED_AFTER_PROOF`.
 - Confirm no keys, `.ssh`, signatures, proof packets, generated PDFs, caches, virtualenvs, or local artefacts are tracked.
 - Bump package version to `0.2.0` only during the release gate.
-- Update changelog from `v0.2.0 in development` to `v0.2.0`.
+- Confirm changelog has a dated `v0.2.0` section.
 - Commit the release.
 - Tag `v0.2.0`.
 - Push branch and tag.

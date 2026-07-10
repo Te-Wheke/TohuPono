@@ -43,7 +43,7 @@ def run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[
 
 
 def test_package_imports() -> None:
-    assert tohupono.__version__ == "0.1.0"
+    assert tohupono.__version__ == "0.2.0"
 
 
 def test_cli_help() -> None:
