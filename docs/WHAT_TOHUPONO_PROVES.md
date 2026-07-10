@@ -2,6 +2,8 @@
 
 TohuPono records local, deterministic evidence about file bytes.
 
+Claim wording follows `docs/CLAIM_MATURITY.md`. Level 1 and Level 2 technical claims must stay tied to the checks that support them.
+
 TohuPono may claim:
 
 - a supplied file matched a specific byte-state;
@@ -11,6 +13,8 @@ TohuPono may claim:
 - an evidence chain has not been detectably tampered with;
 - a copied or renamed file is byte-identical when hashes match;
 - a report was generated from a specific proof packet where report signing material exists.
+
+These are technical and evidence-support claims, not legal proof claims.
 
 TohuPono must not claim:
 

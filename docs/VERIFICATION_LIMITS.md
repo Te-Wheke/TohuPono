@@ -4,6 +4,17 @@ TohuPono verifies byte identity and packet integrity within the local proof mode
 
 It does not prove real-world truth, authorship, intent, or legal admissibility by itself.
 
+The project distinguishes:
+
+- technical verification;
+- evidence preparation;
+- chain-of-custody support;
+- legal argument;
+- legal admissibility;
+- legal proof.
+
+`docs/CLAIM_MATURITY.md` defines which claim language is safe at each maturity level and how integrity gaps are classified.
+
 Local timestamps are useful context, but they are not externally anchored in the offline default mode. Missing external timestamp anchoring is reported as `WARN`.
 
 Manifest signatures and report signatures are separate trust layers:

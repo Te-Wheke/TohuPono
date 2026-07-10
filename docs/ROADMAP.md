@@ -14,6 +14,15 @@
 
 External integrations remain out of the offline default path and should be added only behind explicit user options.
 
+Proof-of-reality is a serious long-term direction, not a current product claim. It should be approached by hardening layered evidence:
+
+- trusted timestamping;
+- witness signatures;
+- device and context attestations;
+- external anchoring;
+- clearer claim maturity tests;
+- legal-support documentation review.
+
 Planned order:
 
 1. OpenTimestamps

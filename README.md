@@ -2,7 +2,7 @@
 
 TohuPono is a deterministic, local-first file-origin proof system. It records evidence about digital files and produces evidence-based verification outputs for a legal-support evidence bundle.
 
-It proves file identity, integrity relative to a sealed digest, observed metadata, and report integrity. It does not make unsupported claims about external truth.
+It verifies technical file identity, digest matches, packet integrity, observed metadata, and report signatures within the local proof model. It does not make unsupported claims about external truth.
 
 ## Quickstart
 
@@ -92,6 +92,12 @@ proof_packet/
 Source file content is not copied unless `--include-payload` is explicitly used.
 
 Evidence-chain hashes make recorded events tamper-evident under the local proof packet model. They do not prove external truth, complete custody, or legal admissibility by themselves.
+
+## Claim Maturity
+
+TohuPono treats stronger claim language as a maturity target, not a slogan. `docs/CLAIM_MATURITY.md` defines safe technical claim levels, restricted high-risk claim zones, and the FAIL/WARN/LIMIT/TODO response model for integrity gaps.
+
+Use terms such as `byte-identical`, `digest match`, `verified file integrity`, `manifest verified`, `signature valid`, `evidence chain intact`, and `packet integrity verified` only when the matching technical checks support them. Legal proof, admissibility, authorship, truth, and proof-of-reality language requires stronger evidence layers and legal review.
 
 ## Verdicts
 
