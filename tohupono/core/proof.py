@@ -346,7 +346,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def packet_diagnostics(packet: Path) -> dict[str, Any]:
+def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
     manifest_path = resolve_packet_manifest(packet)
     proof_dir = manifest_path.parent
     checks: list[dict[str, str]] = []
@@ -432,14 +432,23 @@ def packet_diagnostics(packet: Path) -> dict[str, Any]:
 
     from tohupono.trust.keys import key_lifecycle_summary
 
+    key_lifecycle: dict[str, object] = {}
+    key_warnings: list[str] = []
     for purpose in ["manifest", "report", "amendment"]:
-        lifecycle = key_lifecycle_summary(purpose)
+        lifecycle = key_lifecycle_summary(purpose, key_workspace)
+        key_lifecycle[purpose] = {
+            "compromise_events": lifecycle.get("compromise_events", 0),
+            "latest_compromise_event_id": lifecycle.get("latest_compromise_event_id"),
+            "latest_rotation_event_id": lifecycle.get("latest_rotation_event_id"),
+            "rotation_events": lifecycle.get("rotation_events", 0),
+        }
         if int(lifecycle.get("compromise_events", 0)):
             message = (
                 f"compromise metadata exists for the {purpose} key purpose. "
                 "Existing signatures may require review under the applicable trust policy."
             )
             checks.append({"status": "WARN", "message": message})
+            key_warnings.append(message)
             warnings.append(f"{purpose}_key_compromise_review")
 
     checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
@@ -449,6 +458,9 @@ def packet_diagnostics(packet: Path) -> dict[str, Any]:
         "checks": checks,
         "evidence_chain_status": chain["status"],
         "failures": failures,
+        "key_lifecycle": key_lifecycle,
+        "key_warnings": key_warnings,
+        "key_workspace": str(key_workspace or Path("keys")),
         "manifest_id": identifiers.get("manifest_id"),
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,

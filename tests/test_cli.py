@@ -196,3 +196,77 @@ def test_audit_surfaces_manifest_key_compromise_warning(tmp_path: Path) -> None:
     result = run_cli("audit", str(proof_dir), cwd=tmp_path)
     assert result.returncode == 0
     assert "WARN: compromise metadata exists for the manifest key purpose." in result.stdout
+
+def test_audit_key_workspace_reads_supplied_lifecycle_metadata(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("audit workspace warning\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    key_workspace = tmp_path / "workspace_keys"
+    create_proof_packet(sample, proof_dir)
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_workspace), "--json")
+    assert created.returncode == 0, created.stderr
+    compromised = run_cli(
+        "key",
+        "compromise",
+        "--purpose",
+        "manifest",
+        "--reason",
+        "audit workspace warning test",
+        "--output-dir",
+        str(key_workspace),
+        "--json",
+    )
+    assert compromised.returncode == 0, compromised.stderr
+    result = run_cli("audit", str(proof_dir), "--key-workspace", str(key_workspace))
+    assert result.returncode == 0
+    assert "WARN: compromise metadata exists for the manifest key purpose." in result.stdout
+    assert "BEGIN PRIVATE KEY" not in result.stdout
+
+def test_audit_key_workspace_json_includes_lifecycle_summary(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("audit workspace json\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    key_workspace = tmp_path / "workspace_keys"
+    create_proof_packet(sample, proof_dir)
+    assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_workspace), "--json").returncode == 0
+    assert (
+        run_cli(
+            "key",
+            "rotate",
+            "--purpose",
+            "manifest",
+            "--reason",
+            "audit json rotation",
+            "--output-dir",
+            str(key_workspace),
+            "--json",
+        ).returncode
+        == 0
+    )
+    assert (
+        run_cli(
+            "key",
+            "compromise",
+            "--purpose",
+            "manifest",
+            "--reason",
+            "audit json compromise",
+            "--output-dir",
+            str(key_workspace),
+            "--json",
+        ).returncode
+        == 0
+    )
+    result = run_cli("audit", str(proof_dir), "--key-workspace", str(key_workspace), "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["key_workspace"] == str(key_workspace)
+    assert data["key_lifecycle"]["manifest"]["rotation_events"] == 1
+    assert data["key_lifecycle"]["manifest"]["compromise_events"] == 1
+    assert data["key_warnings"]
+    assert data["status"] == "warn"
+
+def test_audit_help_includes_key_workspace() -> None:
+    result = run_cli("audit", "--help")
+    assert result.returncode == 0, result.stderr
+    assert "--key-workspace" in result.stdout

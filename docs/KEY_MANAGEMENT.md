@@ -69,4 +69,12 @@ A key workspace is the directory containing purpose key files and lifecycle meta
 
 Missing key workspaces are handled as empty local workspaces. Inspection and check commands report missing-key warnings instead of creating files or failing.
 
+Packet audit can also read key lifecycle metadata from a workspace:
+
+```bash
+python -m tohupono audit proof_packet/ --key-workspace /path/to/key-workspace
+```
+
+Audit reports visible compromise metadata as `WARN`. It does not treat compromise metadata as automatic proof destruction and does not add timestamp anchoring.
+
 The current signing backend uses the system OpenSSL CLI with Ed25519 keys. This uses a reviewed cryptographic implementation and is not custom cryptography.

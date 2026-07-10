@@ -26,6 +26,7 @@ tohupono key check --json
 tohupono key create --purpose manifest
 tohupono key rotate --purpose manifest --reason "routine rotation"
 tohupono key compromise --purpose manifest --reason "suspected exposure"
+tohupono audit proof_packet/ --key-workspace keys/
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -66,6 +67,14 @@ python -m tohupono key compromise --purpose manifest --reason "suspected exposur
 Key creation refuses to overwrite existing key files unless `--force` is supplied. Rotation records local JSONL metadata and creates replacement key material without deleting old keys. Compromise marking records local JSONL metadata and causes inspection/check commands to warn that signatures may need trust-policy review.
 
 A key workspace is the directory containing purpose key files plus `key_rotation_log.jsonl` and `key_compromise_log.jsonl`. The default workspace is `keys/`. Use `--output-dir` with create, rotate, compromise, inspect, and check when operating on another local workspace.
+
+Packet audit can read lifecycle metadata from a specific key workspace:
+
+```bash
+python -m tohupono audit proof_packet/ --key-workspace keys/
+```
+
+Compromise metadata appears as a WARN/review trigger. It does not automatically destroy old proofs or change byte-level verification verdicts.
 
 See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance. Local key logs under `keys/` must not be committed.
 

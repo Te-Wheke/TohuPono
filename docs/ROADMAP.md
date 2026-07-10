@@ -9,6 +9,8 @@
 - key compromise metadata with WARN-level trust-policy review prompts;
 - key workspace-aware inspect/check commands;
 - packet audit warnings for visible compromised-key metadata;
+- audit key-workspace selection for lifecycle warning review;
+- v0.4.0 release checklist for key-management gates;
 - continued separation of manifest, report, amendment, witness, release, and test key purposes.
 
 ## v0.3.0

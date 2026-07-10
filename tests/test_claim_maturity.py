@@ -109,3 +109,19 @@ def test_generated_outputs_keep_allowed_mature_claims_bounded(tmp_path: Path) ->
     assert "PASS: file_id matches." in compare.stdout
     assert "PASS: evidence chain intact." in audit.stdout
     assert "PASS: manifest signature valid." in audit.stdout
+
+def test_v040_release_checklist_exists_and_covers_key_gates() -> None:
+    text = Path("docs/release_v0.4.0_checklist.md").read_text(encoding="utf-8")
+    for required in [
+        "develop/v0.4.0",
+        "pytest -q",
+        "python -m compileall tohupono tests",
+        "python -m tohupono key inspect --json",
+        "python -m tohupono key check --json",
+        "audit --key-workspace",
+        "no keys or key lifecycle logs are tracked",
+        "Bump version to `0.4.0` only during the release gate",
+        "annotated tag `v0.4.0`",
+        "peeled tag target",
+    ]:
+        assert required in text

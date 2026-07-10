@@ -46,4 +46,6 @@ python -m tohupono key check --purpose manifest --output-dir /path/to/key-worksp
 
 Rotation metadata supports continuity review. It does not automatically change historical packet verdicts.
 
+`audit --key-workspace` includes rotation event counts in JSON output so reviewers can see lifecycle context alongside packet checks.
+
 If a key was rotated only as routine hygiene, historical signatures may remain valid. If a key was rotated because of compromise, follow `docs/KEY_COMPROMISE.md`.

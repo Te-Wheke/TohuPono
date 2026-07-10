@@ -51,3 +51,15 @@ python -m tohupono key check --purpose manifest --output-dir /path/to/key-worksp
 Key compromise should be treated as at least `WARN` for affected evidence strength. It may become `FAIL` for workflows that require a trustworthy signature from that purpose.
 
 Compromise is a trust-policy review trigger, not automatic proof destruction. Do not delete old proof packets to hide compromise. Preserve them and add clear context. Future trust policies may choose stricter enforcement for specific workflows.
+
+Packet audit can read compromise metadata from a selected workspace:
+
+```bash
+python -m tohupono audit proof_packet/ --key-workspace /path/to/key-workspace
+```
+
+When metadata is visible, audit reports:
+
+```text
+WARN: compromise metadata exists for the manifest key purpose. Existing signatures may require review under the applicable trust policy.
+```

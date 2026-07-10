@@ -10,6 +10,8 @@
 - Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
 - Added `--output-dir` support to `key inspect` and `key check` for workspace-aware key diagnostics.
 - Added packet audit WARN output for local compromised-key metadata where visible.
+- Added `audit --key-workspace` to read key lifecycle metadata from an explicit workspace.
+- Added a v0.4.0 release checklist for key-management hardening gates.
 - Documented key management, rotation, and compromise handling.
 - Kept OpenSSL CLI Ed25519 signing and existing default key paths.
 

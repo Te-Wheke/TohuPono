@@ -307,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_cmd = sub.add_parser("audit", help="Produce a technical proof packet audit.")
     audit_cmd.add_argument("packet")
+    audit_cmd.add_argument("--key-workspace")
     audit_cmd.add_argument("--json", action="store_true")
 
     key_cmd = sub.add_parser("key", help="Manage local key purposes and lifecycle metadata.")
@@ -427,7 +428,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print("PASS: original packet was not modified.")
             return EXIT_SUCCESS
         elif args.command == "audit":
-            result = packet_diagnostics(Path(args.packet))
+            key_workspace = Path(args.key_workspace) if args.key_workspace else None
+            result = packet_diagnostics(Path(args.packet), key_workspace=key_workspace)
             if args.json:
                 _print_json(result)
             else:
