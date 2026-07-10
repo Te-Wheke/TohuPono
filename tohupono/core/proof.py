@@ -19,7 +19,7 @@ from tohupono.trust.keys import (
 )
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
-MANIFEST_VERSION = "0.3.0"
+MANIFEST_VERSION = "0.4.0"
 GENESIS_EVENT_HASH = "GENESIS"
 CHAIN_STATUS_VALID = "valid"
 CHAIN_STATUS_MISSING = "missing"
