@@ -6,8 +6,11 @@
 - Added `none` and `local` timestamp adapters without network calls.
 - Added manifest `timestamping` metadata with `local_only` status for locally created proof packets.
 - Added `tohupono timestamp inspect <packet>` human and JSON diagnostics.
+- Added offline `tohupono timestamp import <packet> <receipt-file>` receipt metadata import.
+- Added timestamp receipt type/status vocabulary and receipt SHA-256 recording.
+- Added audit warnings for imported but unverified timestamp receipts.
 - Added audit reporting for missing and local-only timestamp states as `WARN`, not `FAIL`.
-- Documented timestamp status vocabulary, local-only limits, and planned OpenTimestamps/RFC 3161 adapters.
+- Documented timestamp status vocabulary, imported receipt limits, local-only limits, and planned OpenTimestamps/RFC 3161 adapters.
 
 ## v0.4.0 - 2026-07-10
 

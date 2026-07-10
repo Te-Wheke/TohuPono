@@ -23,5 +23,7 @@ Timestamping:
 - local timestamps are not external anchors;
 - missing or local-only timestamping is a warning, not a verification failure;
 - OpenTimestamps and RFC 3161 are planned adapter types, not implemented network integrations in this slice.
+- imported timestamp receipts are stored as packet evidence with receipt hash, size, target digest, import time, and warning metadata;
+- imported receipts remain `unverified` until an adapter can verify the receipt format and external timestamp service.
 
 The proof ID seed remains based on stable file and proof fields. Timestamping metadata is recorded for evidence review but must not be overstated as legal finality.

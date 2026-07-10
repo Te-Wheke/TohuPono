@@ -13,12 +13,14 @@ from tohupono.core.proof import (
     create_amendment,
     create_proof_packet,
     evidence_chain_diagnostics,
+    import_timestamp_receipt,
+    list_timestamp_receipts,
     load_manifest,
     packet_diagnostics,
     resolve_packet_manifest,
 )
 from tohupono.reporting.pro_report import generate_report
-from tohupono.timestamping.model import inspect_manifest_timestamping
+from tohupono.timestamping.model import TIMESTAMP_RECEIPT_TYPES, TimestampReceiptConflictError, inspect_manifest_timestamping
 from tohupono.trust.keys import (
     KeyConflictError,
     KeyErrorWithAction,
@@ -152,10 +154,14 @@ def _inspect_timestamp(packet: Path) -> dict[str, object]:
     manifest_path = resolve_packet_manifest(packet)
     manifest = load_manifest(manifest_path)
     result = inspect_manifest_timestamping(manifest)
+    receipts = list_timestamp_receipts(manifest_path)
     return {
         "manifest": str(manifest_path),
+        "receipts": receipts,
+        "receipt_count": len(receipts),
+        "status": "ok",
         "timestamping": result,
-        "status": result.get("status", "missing"),
+        "timestamp_status": result.get("status", "missing"),
         "warnings": result.get("warnings", []),
     }
 
@@ -164,10 +170,22 @@ def _print_timestamp_human(result: dict[str, object]) -> None:
     timestamping = result.get("timestamping", {})
     if not isinstance(timestamping, dict):
         timestamping = {}
-    print(f"Timestamp status: {result.get('status')}")
+    print(f"Timestamp status: {result.get('timestamp_status')}")
     print(f"Adapter: {timestamping.get('adapter', 'none')}")
     print(f"Target digest: {timestamping.get('target_digest') or 'unknown'}")
     print(f"Created at: {timestamping.get('created_at') or 'unknown'}")
+    receipts = result.get("receipts") or []
+    print(f"Receipt count: {len(receipts) if isinstance(receipts, list) else 0}")
+    if isinstance(receipts, list):
+        for receipt in receipts:
+            if not isinstance(receipt, dict):
+                continue
+            print(f"Receipt ID: {receipt.get('receipt_id') or 'unknown'}")
+            print(f"Receipt type: {receipt.get('receipt_type') or 'unknown'}")
+            print(f"Receipt status: {receipt.get('receipt_status') or 'unknown'}")
+            print(f"Receipt SHA-256: {receipt.get('receipt_sha256') or 'unknown'}")
+            for warning in receipt.get("warnings") or []:
+                print(f"WARN: {warning}")
     for warning in result.get("warnings") or []:
         print(f"WARN: {warning}")
 
@@ -335,7 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_cmd.add_argument("--key-workspace")
     audit_cmd.add_argument("--json", action="store_true")
 
-    timestamp_cmd = sub.add_parser("timestamp", help="Inspect timestamp proof metadata.")
+    timestamp_cmd = sub.add_parser("timestamp", help="Inspect and import timestamp proof metadata.")
     timestamp_sub = timestamp_cmd.add_subparsers(dest="timestamp_command", required=True)
     timestamp_inspect_cmd = timestamp_sub.add_parser(
         "inspect",
@@ -344,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     timestamp_inspect_cmd.add_argument("packet")
     timestamp_inspect_cmd.add_argument("--json", action="store_true")
+    timestamp_import_cmd = timestamp_sub.add_parser(
+        "import",
+        description="Import an offline timestamp receipt without external verification.",
+        help="Import an offline timestamp receipt.",
+    )
+    timestamp_import_cmd.add_argument("packet")
+    timestamp_import_cmd.add_argument("receipt_file")
+    timestamp_import_cmd.add_argument("--type", choices=TIMESTAMP_RECEIPT_TYPES, default="manual")
+    timestamp_import_cmd.add_argument("--json", action="store_true")
 
     key_cmd = sub.add_parser("key", help="Manage local key purposes and lifecycle metadata.")
     key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
@@ -478,6 +505,21 @@ def run(argv: Sequence[str] | None = None) -> int:
                 else:
                     _print_timestamp_human(result)
                 return EXIT_SUCCESS
+            if args.timestamp_command == "import":
+                result = import_timestamp_receipt(Path(args.packet), Path(args.receipt_file), args.type)
+                if args.json:
+                    _print_json(result)
+                else:
+                    receipt = result.get("receipt", {})
+                    print("PASS: timestamp receipt import recorded.")
+                    if isinstance(receipt, dict):
+                        print(f"Receipt ID: {receipt.get('receipt_id')}")
+                        print(f"Receipt type: {receipt.get('receipt_type')}")
+                        print(f"Receipt status: {receipt.get('receipt_status')}")
+                        print(f"Receipt SHA-256: {receipt.get('receipt_sha256')}")
+                        for warning in receipt.get("warnings") or []:
+                            print(f"WARN: {warning}")
+                return EXIT_SUCCESS
             parser.error("Unknown timestamp command")
         elif args.command == "key":
             if args.key_command == "inspect":
@@ -550,6 +592,8 @@ def run(argv: Sequence[str] | None = None) -> int:
         return _emit_error("INVALID_ARGUMENT", str(exc), json_mode=_json_mode(args), exit_code=EXIT_USER_ERROR)
     except KeyConflictError as exc:
         return _emit_error("KEY_EXISTS", str(exc), json_mode=_json_mode(args), exit_code=EXIT_VERIFICATION_FAILED)
+    except TimestampReceiptConflictError as exc:
+        return _emit_error("RECEIPT_EXISTS", str(exc), json_mode=_json_mode(args), exit_code=EXIT_VERIFICATION_FAILED)
     except KeyErrorWithAction as exc:
         return _emit_error("SIGNATURE_ERROR", str(exc), json_mode=_json_mode(args), exit_code=EXIT_INTERNAL_ERROR)
     except Exception as exc:

@@ -26,4 +26,31 @@ This slice implements only `none` and `local` adapters. It does not call OpenTim
 
 Missing or local-only timestamping is not a verification failure by itself. It weakens timestamp evidence strength and should be disclosed as a warning.
 
+Imported receipts:
+
+```bash
+python -m tohupono timestamp import proof_packet/ ./receipt.bin --type manual
+python -m tohupono timestamp inspect proof_packet/ --json
+```
+
+Receipt types:
+
+- `manual`
+- `opentimestamps`
+- `rfc3161`
+- `unknown`
+
+Receipt statuses:
+
+- `imported`
+- `unverified`
+- `verified`
+- `invalid`
+- `unsupported`
+- `missing`
+
+Manual receipt import records receipt metadata and a copy of the receipt bytes under the proof packet. The receipt record includes receipt ID, type, stored path, receipt hash, receipt size, target digest, import time, status, and warnings.
+
+Imported receipts are `unverified` unless TohuPono can verify the receipt format and external service. In this slice, imported receipts are not externally verified. A receipt hash proves the receipt file was attached or imported into the packet; it does not prove the external timestamp is valid.
+
 Timestamping can support proof-of-existence at or before a time once external anchoring exists. Timestamping alone does not prove content truth, authorship, intent, or legal admissibility.

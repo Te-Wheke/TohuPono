@@ -23,3 +23,6 @@ verification_report.pdf
 verification_report.pdf.sig
 verification_report.pdf.pub
 verification_report.md
+timestamp_receipts/
+*.ots
+*.tsr

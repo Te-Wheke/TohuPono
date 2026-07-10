@@ -6,6 +6,8 @@
 - timestamp adapter interface;
 - `none` and `local` timestamp adapters;
 - `timestamp inspect` diagnostics;
+- manual/offline timestamp receipt import;
+- receipt metadata and unverified receipt warnings;
 - audit warnings for missing and local-only timestamp states;
 - OpenTimestamps and RFC 3161 interfaces before implementations.
 

@@ -11,7 +11,15 @@ from typing import Any, Literal
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
-from tohupono.timestamping.model import inspect_manifest_timestamping, local_timestamp_proof
+from tohupono.timestamping.model import (
+    TIMESTAMP_RECEIPT_TYPES,
+    UNVERIFIED_RECEIPT_WARNING,
+    TimestampReceipt,
+    TimestampReceiptConflictError,
+    inspect_manifest_timestamping,
+    local_timestamp_proof,
+    make_receipt_id,
+)
 from tohupono.trust.keys import (
     DEFAULT_MANIFEST_KEY,
     DEFAULT_MANIFEST_PUBLIC_KEY,
@@ -277,6 +285,10 @@ def packet_dir(packet: Path) -> Path:
     return manifest.parent
 
 
+def timestamp_receipts_dir(packet: Path) -> Path:
+    return packet_dir(packet) / "timestamp_receipts"
+
+
 def _assert_can_create_packet(output: Path) -> None:
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"Refusing to overwrite existing proof packet: {output}")
@@ -349,6 +361,88 @@ def create_proof_packet(
 
 def load_manifest(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def list_timestamp_receipts(packet: Path) -> list[dict[str, object]]:
+    receipts_dir = timestamp_receipts_dir(packet)
+    if not receipts_dir.exists():
+        return []
+    receipts: list[dict[str, object]] = []
+    for receipt_path in sorted(receipts_dir.glob("receipt_*.json")):
+        try:
+            receipt = load_manifest(receipt_path)
+        except (OSError, json.JSONDecodeError):
+            receipts.append(
+                {
+                    "receipt_id": receipt_path.stem.removeprefix("receipt_"),
+                    "receipt_path": str(receipt_path),
+                    "receipt_status": "invalid",
+                    "warnings": ["Timestamp receipt metadata could not be read."],
+                }
+            )
+            continue
+        if isinstance(receipt, dict):
+            receipts.append(receipt)
+    return receipts
+
+
+def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str = "manual") -> dict[str, object]:
+    if receipt_type not in TIMESTAMP_RECEIPT_TYPES:
+        raise ValueError(f"Unsupported timestamp receipt type: {receipt_type}")
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    file_info = manifest.get("file", {})
+    if not isinstance(file_info, dict) or not file_info.get("sha256"):
+        raise ValueError("Proof manifest does not contain a target file digest.")
+    if not receipt_file.exists() or not receipt_file.is_file():
+        raise FileNotFoundError(str(receipt_file))
+
+    target_digest = str(file_info["sha256"])
+    receipt_sha256 = _file_sha256(receipt_file)
+    receipt_size = receipt_file.stat().st_size
+    receipt_id = make_receipt_id(
+        receipt_type=receipt_type,
+        receipt_sha256=receipt_sha256,
+        receipt_size=receipt_size,
+        target_digest=target_digest,
+    )
+    receipts_dir = manifest_path.parent / "timestamp_receipts"
+    receipt_metadata_path = receipts_dir / f"receipt_{receipt_id}.json"
+    stored_receipt_path = receipts_dir / f"receipt_{receipt_id}.bin"
+    if receipt_metadata_path.exists() or stored_receipt_path.exists():
+        raise TimestampReceiptConflictError("Refusing to overwrite existing timestamp receipt import.")
+
+    receipts_dir.mkdir(exist_ok=True)
+    shutil.copyfile(receipt_file, stored_receipt_path)
+    adapter_type = receipt_type if receipt_type in {"manual", "opentimestamps", "rfc3161"} else "none"
+    record = TimestampReceipt(
+        receipt_id=receipt_id,
+        receipt_type=receipt_type,  # type: ignore[arg-type]
+        receipt_path=str(stored_receipt_path.relative_to(manifest_path.parent)),
+        receipt_sha256=receipt_sha256,
+        receipt_size=receipt_size,
+        receipt_format=receipt_file.suffix.lower().lstrip(".") or "unknown",
+        receipt_status="unverified",
+        adapter_type=adapter_type,  # type: ignore[arg-type]
+        target_digest=target_digest,
+        imported_at=utc_now_iso(),
+        warnings=[UNVERIFIED_RECEIPT_WARNING],
+    ).to_dict()
+    write_json(receipt_metadata_path, record)
+    return {
+        "receipt": record,
+        "receipt_metadata_path": str(receipt_metadata_path),
+        "stored_receipt_path": str(stored_receipt_path),
+        "status": "ok",
+    }
 
 
 def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
@@ -457,6 +551,7 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
             warnings.append(f"{purpose}_key_compromise_review")
 
     timestamping = inspect_manifest_timestamping(manifest)
+    timestamp_receipts = list_timestamp_receipts(manifest_path)
     timestamp_status = str(timestamping.get("status"))
     if timestamp_status == "local_only":
         checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
@@ -469,6 +564,14 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
     else:
         checks.append({"status": "WARN", "message": f"timestamp status is {timestamp_status}."})
         warnings.append(f"timestamp_{timestamp_status}")
+    if any(receipt.get("receipt_status") == "unverified" for receipt in timestamp_receipts):
+        checks.append(
+            {
+                "status": "WARN",
+                "message": "imported timestamp receipt is present but not externally verified by TohuPono.",
+            }
+        )
+        warnings.append("timestamp_receipt_unverified")
     status = "fail" if failures else ("warn" if warnings else "pass")
     return {
         "checks": checks,
@@ -481,6 +584,7 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,
         "status": status,
+        "timestamp_receipts": timestamp_receipts,
         "timestamping": timestamping,
         "timestamp_status": timestamp_status,
         "warnings": warnings,

@@ -19,6 +19,8 @@ Local timestamps are useful context, but they are not externally anchored in the
 
 Timestamping can support proof-of-existence once external anchoring exists. A timestamp alone does not prove content truth, authorship, intent, or legal admissibility.
 
+Imported timestamp receipts are recorded as `unverified` unless TohuPono can verify the receipt format and external timestamp service. The receipt hash proves the attached receipt bytes were recorded; it does not prove external validity by itself.
+
 Manifest signatures and report signatures are separate trust layers:
 
 - the manifest key signs the proof manifest;

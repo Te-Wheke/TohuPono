@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+from tohupono.core.canonical_json import canonical_json_bytes
+
 TimestampStatus = Literal["missing", "local_only", "pending", "anchored", "invalid", "unsupported", "error"]
 TimestampAdapterType = Literal["none", "local", "opentimestamps", "rfc3161", "manual"]
+TimestampReceiptType = Literal["manual", "opentimestamps", "rfc3161", "unknown"]
+TimestampReceiptStatus = Literal["imported", "unverified", "verified", "invalid", "unsupported", "missing"]
 
 TIMESTAMP_STATUSES: tuple[TimestampStatus, ...] = (
     "missing",
@@ -22,8 +27,27 @@ TIMESTAMP_ADAPTER_TYPES: tuple[TimestampAdapterType, ...] = (
     "rfc3161",
     "manual",
 )
+TIMESTAMP_RECEIPT_TYPES: tuple[TimestampReceiptType, ...] = (
+    "manual",
+    "opentimestamps",
+    "rfc3161",
+    "unknown",
+)
+TIMESTAMP_RECEIPT_STATUSES: tuple[TimestampReceiptStatus, ...] = (
+    "imported",
+    "unverified",
+    "verified",
+    "invalid",
+    "unsupported",
+    "missing",
+)
 LOCAL_TIMESTAMP_WARNING = "Local timestamp is not externally anchored."
 MISSING_TIMESTAMP_WARNING = "No timestamp proof is present."
+UNVERIFIED_RECEIPT_WARNING = "Imported timestamp receipt is recorded but not externally verified by TohuPono."
+
+
+class TimestampReceiptConflictError(Exception):
+    """Raised when a receipt import would overwrite existing receipt material."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +74,38 @@ class TimestampVerificationResult:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class TimestampReceipt:
+    receipt_id: str
+    receipt_type: TimestampReceiptType
+    receipt_path: str
+    receipt_sha256: str
+    receipt_size: int
+    receipt_format: str
+    receipt_status: TimestampReceiptStatus
+    adapter_type: TimestampAdapterType
+    target_digest: str
+    imported_at: str
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def make_receipt_id(*, receipt_type: str, receipt_sha256: str, receipt_size: int, target_digest: str) -> str:
+    digest = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "receipt_sha256": receipt_sha256,
+                "receipt_size": receipt_size,
+                "receipt_type": receipt_type,
+                "target_digest": target_digest,
+            }
+        )
+    ).hexdigest()
+    return f"tr_{digest[:32]}"
 
 
 def local_timestamp_proof(target_digest: str, created_at: str) -> TimestampProof:

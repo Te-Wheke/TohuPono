@@ -21,6 +21,7 @@ tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 tohupono inspect-proof proof_packet/manifest.json --json
 tohupono timestamp inspect proof_packet/
 tohupono timestamp inspect proof_packet/ --json
+tohupono timestamp import proof_packet/ ./receipt.bin --type manual
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -137,6 +138,14 @@ python -m tohupono timestamp inspect proof_packet/ --json
 ```
 
 `local_only` and `missing` timestamp states are reported as `WARN`, not `FAIL`. They do not provide external anchoring. Planned future adapters include OpenTimestamps and RFC 3161.
+
+Manual timestamp receipts can be imported offline:
+
+```bash
+python -m tohupono timestamp import proof_packet/ ./receipt.bin --type manual --json
+```
+
+Imported receipts are recorded as `unverified` unless TohuPono can verify the receipt format and external timestamp service. A receipt hash records the attached receipt bytes; it does not prove external timestamp validity by itself.
 
 ## Claim Maturity
 
