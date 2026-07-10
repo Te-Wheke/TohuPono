@@ -44,4 +44,23 @@ python -m tohupono key check --json
 
 Missing keys are warnings unless an operation currently needs the key. This lets a fresh offline workspace inspect its configuration before first signing.
 
+Create a keypair for a purpose:
+
+```bash
+python -m tohupono key create --purpose manifest
+python -m tohupono key create --purpose report --output-dir keys/
+python -m tohupono key create --purpose witness --json
+```
+
+Key creation uses OpenSSL CLI Ed25519. It creates parent directories as needed, writes the private key with restrictive permissions where the platform supports them, exports the public key, and never prints private key contents. Existing key files are not overwritten unless `--force` is explicitly supplied.
+
+Lifecycle metadata is stored locally under `keys/`:
+
+```text
+keys/key_rotation_log.jsonl
+keys/key_compromise_log.jsonl
+```
+
+These logs are local trust records. They must not be committed with private keys, generated proof packets, generated reports, or signatures.
+
 The current signing backend uses the system OpenSSL CLI with Ed25519 keys. This uses a reviewed cryptographic implementation and is not custom cryptography.

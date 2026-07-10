@@ -4,7 +4,9 @@
 
 - key purpose registry;
 - key inspection and hygiene checks;
-- key rotation and compromise documentation;
+- local key creation by explicit purpose;
+- key rotation metadata without deleting old keys;
+- key compromise metadata with WARN-level trust-policy review prompts;
 - continued separation of manifest, report, amendment, witness, release, and test key purposes.
 
 ## v0.3.0

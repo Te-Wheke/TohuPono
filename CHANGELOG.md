@@ -5,6 +5,9 @@
 - Added key purpose registry entries for manifest, report, witness, amendment, release, and test purposes.
 - Added `tohupono key inspect` for human and JSON key purpose inspection.
 - Added `tohupono key check` for local key hygiene diagnostics.
+- Added `tohupono key create` for local OpenSSL Ed25519 keypair creation by purpose.
+- Added `tohupono key rotate` with JSONL rotation metadata and no old-key deletion.
+- Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
 - Documented key management, rotation, and compromise handling.
 - Kept OpenSSL CLI Ed25519 signing and existing default key paths.
 

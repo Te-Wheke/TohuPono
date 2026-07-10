@@ -23,6 +23,9 @@ tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
 tohupono key check --json
+tohupono key create --purpose manifest
+tohupono key rotate --purpose manifest --reason "routine rotation"
+tohupono key compromise --purpose manifest --reason "suspected exposure"
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -53,9 +56,14 @@ Key purposes are inspectable:
 ```bash
 python -m tohupono key inspect --purpose manifest
 python -m tohupono key check --json
+python -m tohupono key create --purpose manifest
+python -m tohupono key rotate --purpose manifest --reason "routine rotation"
+python -m tohupono key compromise --purpose manifest --reason "suspected exposure"
 ```
 
-See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance.
+Key creation refuses to overwrite existing key files unless `--force` is supplied. Rotation records local JSONL metadata and creates replacement key material without deleting old keys. Compromise marking records local JSONL metadata and causes inspection/check commands to warn that signatures may need trust-policy review.
+
+See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance. Local key logs under `keys/` must not be committed.
 
 ## v0.3.0 Development Goals
 

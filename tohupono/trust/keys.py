@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+
+from tohupono import __version__
+from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 
 
 class KeyErrorWithAction(Exception):
     """Raised when key handling cannot proceed safely."""
+
+
+class KeyConflictError(Exception):
+    """Raised when key handling refuses to overwrite local key material."""
 
 
 DEFAULT_MANIFEST_KEY = Path("keys/manifest_signing_key.pem")
@@ -17,6 +27,12 @@ DEFAULT_REPORT_KEY = Path("keys/report_signing_key.pem")
 DEFAULT_REPORT_PUBLIC_KEY = Path("keys/report_signing_key.pub")
 DEFAULT_AMENDMENT_KEY = Path("keys/amendment_signing_key.pem")
 DEFAULT_AMENDMENT_PUBLIC_KEY = Path("keys/amendment_signing_key.pub")
+DEFAULT_ROTATION_LOG = Path("keys/key_rotation_log.jsonl")
+DEFAULT_COMPROMISE_LOG = Path("keys/key_compromise_log.jsonl")
+COMPROMISE_WARNING = (
+    "compromise metadata exists for this key purpose. Existing signatures may "
+    "require review under the applicable trust policy."
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +150,59 @@ def selected_key_purposes(purpose: str | None = None) -> list[KeyPurpose]:
     return [KEY_PURPOSES[name] for name in key_purpose_names()]
 
 
+def _now_utc() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _paths_for_purpose(purpose: KeyPurpose, output_dir: Path | None = None) -> tuple[Path, Path]:
+    if output_dir is None:
+        return purpose.private_key_path, purpose.public_key_path
+    return (
+        output_dir / f"{purpose.purpose}_signing_key.pem",
+        output_dir / f"{purpose.purpose}_signing_key.pub",
+    )
+
+
+def _rotation_log_path(output_dir: Path | None = None) -> Path:
+    return (output_dir / "key_rotation_log.jsonl") if output_dir else DEFAULT_ROTATION_LOG
+
+
+def _compromise_log_path(output_dir: Path | None = None) -> Path:
+    return (output_dir / "key_compromise_log.jsonl") if output_dir else DEFAULT_COMPROMISE_LOG
+
+
+def _event_id(value: dict[str, object]) -> str:
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _append_jsonl(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(canonical_json_text(value))
+        handle.write("\n")
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    entries: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        value = json.loads(line)
+        if isinstance(value, dict):
+            entries.append(value)
+    return entries
+
+
+def _entries_for_purpose(path: Path, purpose: str, event_type: str) -> list[dict[str, object]]:
+    return [
+        entry
+        for entry in _read_jsonl(path)
+        if entry.get("purpose") == purpose and entry.get("event_type") == event_type
+    ]
+
+
 def _path_warnings(path: Path, *, private: bool) -> list[str]:
     warnings: list[str] = []
     normalized = path.as_posix()
@@ -147,11 +216,15 @@ def _path_warnings(path: Path, *, private: bool) -> list[str]:
 def inspect_key_purpose(purpose: KeyPurpose) -> dict[str, object]:
     private_exists = purpose.private_key_path.exists()
     public_exists = purpose.public_key_path.exists()
+    rotation_entries = _entries_for_purpose(DEFAULT_ROTATION_LOG, purpose.purpose, "KEY_ROTATED")
+    compromise_entries = _entries_for_purpose(DEFAULT_COMPROMISE_LOG, purpose.purpose, "KEY_COMPROMISED")
     warnings: list[str] = []
     if not private_exists:
         warnings.append("private key missing")
     if not public_exists:
         warnings.append("public key missing")
+    if compromise_entries:
+        warnings.append(COMPROMISE_WARNING)
     warnings.extend(_path_warnings(purpose.private_key_path, private=True))
     warnings.extend(_path_warnings(purpose.public_key_path, private=False))
     return {
@@ -164,6 +237,10 @@ def inspect_key_purpose(purpose: KeyPurpose) -> dict[str, object]:
         "public_key_path": str(purpose.public_key_path),
         "public_required_for_verification": purpose.public_required_for_verification,
         "purpose": purpose.purpose,
+        "rotation_event_count": len(rotation_entries),
+        "latest_rotation_event_id": rotation_entries[-1].get("rotation_event_id") if rotation_entries else None,
+        "compromise_event_count": len(compromise_entries),
+        "latest_compromise_event_id": compromise_entries[-1].get("compromise_event_id") if compromise_entries else None,
         "status": purpose.status,
         "warnings": warnings,
     }
@@ -223,6 +300,126 @@ def generate_private_key(path: Path, force: bool = False) -> Path:
     _run_openssl(["genpkey", "-algorithm", "ED25519", "-out", str(path)])
     os.chmod(path, 0o600)
     return path
+
+
+def create_key(
+    purpose_name: str,
+    *,
+    output_dir: Path | None = None,
+    force: bool = False,
+) -> dict[str, object]:
+    purpose = get_key_purpose(purpose_name)
+    if purpose.status == "test-only":
+        raise ValueError("Key creation is not supported for the test purpose.")
+    private_key, public_key = _paths_for_purpose(purpose, output_dir)
+    if not force and (private_key.exists() or public_key.exists()):
+        raise KeyConflictError("Refusing to overwrite existing key files without --force.")
+    if force:
+        for path in (private_key, public_key):
+            if path.exists():
+                path.unlink()
+    generate_private_key(private_key)
+    export_public_key(private_key, public_key)
+    return {
+        "created": True,
+        "private_key_path": str(private_key),
+        "public_key_path": str(public_key),
+        "purpose": purpose.purpose,
+        "status": "ok",
+        "warnings": [],
+    }
+
+
+def rotate_key(
+    purpose_name: str,
+    reason: str,
+    *,
+    output_dir: Path | None = None,
+) -> dict[str, object]:
+    if not reason.strip():
+        raise ValueError("Rotation reason is required.")
+    purpose = get_key_purpose(purpose_name)
+    if purpose.status == "test-only":
+        raise ValueError("Key rotation is not supported for the test purpose.")
+    old_private, old_public = _paths_for_purpose(purpose, output_dir)
+    timestamp = _now_utc()
+    seed = {
+        "event_type": "KEY_ROTATED",
+        "old_public_key_path": str(old_public),
+        "purpose": purpose.purpose,
+        "reason": reason,
+        "timestamp": timestamp,
+        "tool_version": __version__,
+    }
+    rotation_event_id = _event_id(seed)
+    new_private = old_private.with_name(f"{old_private.stem}_rotated_{rotation_event_id[:12]}{old_private.suffix}")
+    new_public = old_public.with_name(f"{old_public.stem}_rotated_{rotation_event_id[:12]}{old_public.suffix}")
+    if new_private.exists() or new_public.exists():
+        raise KeyConflictError("Refusing to overwrite existing rotated key files.")
+    generate_private_key(new_private)
+    export_public_key(new_private, new_public)
+    warnings: list[str] = []
+    if not old_public.exists():
+        warnings.append("old public key missing; rotation metadata still recorded")
+    entry = {
+        **seed,
+        "new_public_key_path": str(new_public),
+        "rotation_event_id": rotation_event_id,
+    }
+    log_path = _rotation_log_path(output_dir)
+    _append_jsonl(log_path, entry)
+    return {
+        "created": True,
+        "new_private_key_path": str(new_private),
+        "new_public_key_path": str(new_public),
+        "old_public_key_path": str(old_public),
+        "purpose": purpose.purpose,
+        "rotation_event_id": rotation_event_id,
+        "rotation_log_path": str(log_path),
+        "status": "ok",
+        "warnings": warnings,
+    }
+
+
+def mark_key_compromised(
+    purpose_name: str,
+    reason: str,
+    *,
+    output_dir: Path | None = None,
+) -> dict[str, object]:
+    if not reason.strip():
+        raise ValueError("Compromise reason is required.")
+    purpose = get_key_purpose(purpose_name)
+    if purpose.status == "test-only":
+        raise ValueError("Key compromise marking is not supported for the test purpose.")
+    _, public_key = _paths_for_purpose(purpose, output_dir)
+    timestamp = _now_utc()
+    seed = {
+        "event_type": "KEY_COMPROMISED",
+        "public_key_path": str(public_key),
+        "purpose": purpose.purpose,
+        "reason": reason,
+        "timestamp": timestamp,
+        "tool_version": __version__,
+    }
+    entry = {
+        **seed,
+        "compromise_event_id": _event_id(seed),
+    }
+    log_path = _compromise_log_path(output_dir)
+    _append_jsonl(log_path, entry)
+    warnings: list[str] = []
+    if not public_key.exists():
+        warnings.append("public key missing; compromise metadata still recorded")
+    return {
+        "compromise_event_id": entry["compromise_event_id"],
+        "compromise_log_path": str(log_path),
+        "created": True,
+        "public_key_path": str(public_key),
+        "purpose": purpose.purpose,
+        "status": "ok",
+        "warnings": warnings,
+    }
 
 
 def generate_report_key(path: Path, force: bool = False) -> Path:
