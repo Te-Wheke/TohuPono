@@ -107,6 +107,21 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
     evidence_chain_status = str(chain_result["status"])
     chain_errors = [str(error) for error in chain_result["errors"]]
     warnings.extend(chain_errors)
+    if evidence_chain_status == "invalid":
+        reasons.append("Evidence chain validation failed")
+        return VerificationResult(
+            verdict=PROVENANCE_CONFLICT,
+            file_sha256=None,
+            manifest_sha256=None,
+            proof_id=proof_id,
+            summary="Evidence chain validation failed.",
+            manifest_signature_status=signature_status,
+            warnings=warnings,
+            reasons=reasons,
+            notes=notes,
+            signature_evidence={"manifest_signature": signature_status},
+            evidence_chain_status=evidence_chain_status,
+        )
     if not isinstance(manifest_file, dict) or not manifest_file.get("sha256"):
         return VerificationResult(
             verdict=UNPROVEN,
