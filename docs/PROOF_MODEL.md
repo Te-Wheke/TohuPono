@@ -25,5 +25,7 @@ Timestamping:
 - OpenTimestamps and RFC 3161 are planned adapter types, not implemented network integrations in this slice.
 - imported timestamp receipts are stored as packet evidence with receipt hash, size, target digest, import time, and warning metadata;
 - imported receipts remain `unverified` until an adapter can verify the receipt format and external timestamp service.
+- timestamp verification policies are `permissive`, `evidence_review`, and `strict_external`;
+- packet audit uses `evidence_review`, where local-only and unverified receipts are WARN but receipt conflicts are FAIL.
 
 The proof ID seed remains based on stable file and proof fields. Timestamping metadata is recorded for evidence review but must not be overstated as legal finality.

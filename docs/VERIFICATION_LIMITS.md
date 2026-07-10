@@ -21,6 +21,8 @@ Timestamping can support proof-of-existence once external anchoring exists. A ti
 
 Imported timestamp receipts are recorded as `unverified` unless TohuPono can verify the receipt format and external timestamp service. The receipt hash proves the attached receipt bytes were recorded; it does not prove external validity by itself.
 
+The default timestamp policy is `evidence_review`. It reports missing external anchoring, local-only timestamps, and unverified receipts as WARN, while corrupted receipt metadata, receipt target mismatch, missing stored receipt bytes, and receipt hash mismatch are FAIL. `strict_external` is opt-in and fails when verified external timestamp evidence is absent.
+
 Manifest signatures and report signatures are separate trust layers:
 
 - the manifest key signs the proof manifest;

@@ -108,6 +108,8 @@ def test_timestamp_inspect_json_is_parseable(tmp_path: Path) -> None:
     assert data["timestamp_status"] == "local_only"
     assert data["timestamping"]["adapter"] == "local"
     assert data["receipts"] == []
+    assert data["warning_count"] == 1
+    assert data["failure_count"] == 0
     assert LOCAL_TIMESTAMP_WARNING in data["warnings"]
 
 
@@ -303,8 +305,240 @@ def test_cli_help_lists_timestamp_import() -> None:
     assert "Import an offline timestamp receipt" in result.stdout
 
 
+def test_cli_help_lists_timestamp_verify() -> None:
+    result = run_cli("timestamp", "verify", "--help")
+    assert result.returncode == 0
+    assert "Verify timestamp metadata and imported receipt integrity" in result.stdout
+
+
+def test_timestamp_verify_json_is_parseable(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("timestamp verify json\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert data["policy"] == "evidence_review"
+    assert data["status"] == "warn"
+    assert data["timestamping_status"] == "local_only"
+
+
+def test_default_policy_warns_for_local_only_timestamp(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("timestamp default policy\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert data["failure_count"] == 0
+    assert LOCAL_TIMESTAMP_WARNING in data["warnings"]
+
+
+def test_strict_external_fails_for_local_only_without_external_timestamp(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("timestamp strict policy\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("timestamp", "verify", str(proof_dir), "--policy", "strict_external", "--json")
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    assert data["status"] == "fail"
+    assert "timestamp_local_only" in data["failures"]
+
+
+def test_unverified_imported_receipt_warns_under_evidence_review(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("receipt evidence review\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    run_cli("timestamp", "import", str(proof_dir), str(receipt))
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert data["failure_count"] == 0
+    assert UNVERIFIED_RECEIPT_WARNING in data["warnings"]
+
+
+def test_unverified_imported_receipt_fails_under_strict_external(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("receipt strict review\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    run_cli("timestamp", "import", str(proof_dir), str(receipt))
+    result = run_cli("timestamp", "verify", str(proof_dir), "--policy", "strict_external", "--json")
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    assert data["status"] == "fail"
+    assert any("unverified_under_strict_external" in failure for failure in data["failures"])
+
+
+def _receipt_metadata_path(proof_dir: Path) -> Path:
+    return next((proof_dir / "timestamp_receipts").glob("receipt_*.json"))
+
+
+def _import_receipt(proof_dir: Path, receipt: Path) -> dict[str, object]:
+    result = run_cli("timestamp", "import", str(proof_dir), str(receipt), "--json")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)["receipt"]
+
+
+def test_receipt_target_digest_mismatch_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("target mismatch\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["target_digest"] = "0" * 64
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("target_digest_mismatch" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_missing_stored_file_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("missing stored receipt\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    (proof_dir / str(record["receipt_path"])).unlink()
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("stored_file_missing" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_sha256_mismatch_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("sha mismatch\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    (proof_dir / str(record["receipt_path"])).write_text("changed receipt\n", encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("sha256_mismatch" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_duplicate_receipt_id_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("duplicate receipt\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    duplicate_path = proof_dir / "timestamp_receipts" / "receipt_duplicate.json"
+    duplicate_path.write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert "timestamp_receipt_duplicate_id" in json.loads(result.stdout)["failures"]
+
+
+def test_receipt_metadata_missing_required_field_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("missing receipt metadata field\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record.pop("receipt_sha256")
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("metadata_missing_fields" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_metadata_unsupported_type_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("unsupported receipt type metadata\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["receipt_type"] = "badtype"
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("unsupported_receipt_type" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_metadata_invalid_status_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("invalid receipt status metadata\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["receipt_status"] = "strange"
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("invalid_receipt_status" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_timestamp_verify_unsupported_policy_returns_exit_code_2(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("bad policy\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("timestamp", "verify", str(proof_dir), "--policy", "unsupported")
+    assert result.returncode == 2
+
+
+def test_timestamp_inspect_json_includes_diagnostic_counts(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("inspect counts\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    run_cli("timestamp", "import", str(proof_dir), str(receipt))
+    result = run_cli("timestamp", "inspect", str(proof_dir), "--json")
+    data = json.loads(result.stdout)
+    assert data["receipt_count"] == 1
+    assert data["warning_count"] >= 2
+    assert data["failure_count"] == 0
+
+
+def test_audit_includes_timestamp_failure_for_receipt_target_mismatch(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("audit timestamp fail\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["target_digest"] = "f" * 64
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("audit", str(proof_dir))
+    assert result.returncode == 1
+    assert "FAIL: timestamp receipt target digest does not match packet manifest digest." in result.stdout
+
+
 def test_timestamping_doc_documents_imported_receipts() -> None:
     text = Path("docs/TIMESTAMPING.md").read_text(encoding="utf-8")
     assert "imported receipts" in text.lower()
     assert "unverified" in text
     assert "receipt hash" in text.lower()
+
+
+def test_timestamping_doc_documents_policies() -> None:
+    text = Path("docs/TIMESTAMPING.md").read_text(encoding="utf-8")
+    assert "evidence_review" in text
+    assert "strict_external" in text
+    assert "receipt target digest" in text.lower()

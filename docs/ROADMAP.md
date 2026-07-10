@@ -8,6 +8,7 @@
 - `timestamp inspect` diagnostics;
 - manual/offline timestamp receipt import;
 - receipt metadata and unverified receipt warnings;
+- timestamp verification policies and receipt conflict diagnostics;
 - audit warnings for missing and local-only timestamp states;
 - OpenTimestamps and RFC 3161 interfaces before implementations.
 

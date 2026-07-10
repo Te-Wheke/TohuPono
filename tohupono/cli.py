@@ -18,9 +18,16 @@ from tohupono.core.proof import (
     load_manifest,
     packet_diagnostics,
     resolve_packet_manifest,
+    timestamp_verification_diagnostics,
 )
 from tohupono.reporting.pro_report import generate_report
-from tohupono.timestamping.model import TIMESTAMP_RECEIPT_TYPES, TimestampReceiptConflictError, inspect_manifest_timestamping
+from tohupono.timestamping.model import (
+    DEFAULT_TIMESTAMP_POLICY,
+    TIMESTAMP_POLICIES,
+    TIMESTAMP_RECEIPT_TYPES,
+    TimestampReceiptConflictError,
+    inspect_manifest_timestamping,
+)
 from tohupono.trust.keys import (
     KeyConflictError,
     KeyErrorWithAction,
@@ -155,14 +162,17 @@ def _inspect_timestamp(packet: Path) -> dict[str, object]:
     manifest = load_manifest(manifest_path)
     result = inspect_manifest_timestamping(manifest)
     receipts = list_timestamp_receipts(manifest_path)
+    diagnostics = timestamp_verification_diagnostics(manifest_path, DEFAULT_TIMESTAMP_POLICY)
     return {
+        "failure_count": diagnostics["failure_count"],
         "manifest": str(manifest_path),
         "receipts": receipts,
         "receipt_count": len(receipts),
         "status": "ok",
         "timestamping": result,
         "timestamp_status": result.get("status", "missing"),
-        "warnings": result.get("warnings", []),
+        "warning_count": diagnostics["warning_count"],
+        "warnings": diagnostics.get("warnings", []),
     }
 
 
@@ -188,6 +198,16 @@ def _print_timestamp_human(result: dict[str, object]) -> None:
                 print(f"WARN: {warning}")
     for warning in result.get("warnings") or []:
         print(f"WARN: {warning}")
+
+
+def _print_timestamp_verify_human(result: dict[str, object]) -> None:
+    print(f"Timestamp verification status: {result.get('status')}")
+    print(f"Policy: {result.get('policy')}")
+    print(f"Timestamping status: {result.get('timestamping_status')}")
+    print(f"Receipt count: {result.get('receipt_count')}")
+    for check in result.get("checks") or []:
+        if isinstance(check, dict):
+            print(f"{check.get('status')}: {check.get('message')}")
 
 
 def _print_verify_file_human(result: object) -> None:
@@ -371,6 +391,14 @@ def build_parser() -> argparse.ArgumentParser:
     timestamp_import_cmd.add_argument("receipt_file")
     timestamp_import_cmd.add_argument("--type", choices=TIMESTAMP_RECEIPT_TYPES, default="manual")
     timestamp_import_cmd.add_argument("--json", action="store_true")
+    timestamp_verify_cmd = timestamp_sub.add_parser(
+        "verify",
+        description="Verify timestamp metadata and imported receipt integrity.",
+        help="Verify timestamp metadata and imported receipt integrity.",
+    )
+    timestamp_verify_cmd.add_argument("packet")
+    timestamp_verify_cmd.add_argument("--policy", choices=TIMESTAMP_POLICIES, default=DEFAULT_TIMESTAMP_POLICY)
+    timestamp_verify_cmd.add_argument("--json", action="store_true")
 
     key_cmd = sub.add_parser("key", help="Manage local key purposes and lifecycle metadata.")
     key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
@@ -520,6 +548,13 @@ def run(argv: Sequence[str] | None = None) -> int:
                         for warning in receipt.get("warnings") or []:
                             print(f"WARN: {warning}")
                 return EXIT_SUCCESS
+            if args.timestamp_command == "verify":
+                result = timestamp_verification_diagnostics(Path(args.packet), args.policy)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_timestamp_verify_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
             parser.error("Unknown timestamp command")
         elif args.command == "key":
             if args.key_command == "inspect":

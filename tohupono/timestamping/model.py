@@ -10,6 +10,7 @@ TimestampStatus = Literal["missing", "local_only", "pending", "anchored", "inval
 TimestampAdapterType = Literal["none", "local", "opentimestamps", "rfc3161", "manual"]
 TimestampReceiptType = Literal["manual", "opentimestamps", "rfc3161", "unknown"]
 TimestampReceiptStatus = Literal["imported", "unverified", "verified", "invalid", "unsupported", "missing"]
+TimestampPolicy = Literal["permissive", "evidence_review", "strict_external"]
 
 TIMESTAMP_STATUSES: tuple[TimestampStatus, ...] = (
     "missing",
@@ -41,6 +42,12 @@ TIMESTAMP_RECEIPT_STATUSES: tuple[TimestampReceiptStatus, ...] = (
     "unsupported",
     "missing",
 )
+TIMESTAMP_POLICIES: tuple[TimestampPolicy, ...] = (
+    "permissive",
+    "evidence_review",
+    "strict_external",
+)
+DEFAULT_TIMESTAMP_POLICY: TimestampPolicy = "evidence_review"
 LOCAL_TIMESTAMP_WARNING = "Local timestamp is not externally anchored."
 MISSING_TIMESTAMP_WARNING = "No timestamp proof is present."
 UNVERIFIED_RECEIPT_WARNING = "Imported timestamp receipt is recorded but not externally verified by TohuPono."

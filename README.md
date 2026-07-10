@@ -22,6 +22,7 @@ tohupono inspect-proof proof_packet/manifest.json --json
 tohupono timestamp inspect proof_packet/
 tohupono timestamp inspect proof_packet/ --json
 tohupono timestamp import proof_packet/ ./receipt.bin --type manual
+tohupono timestamp verify proof_packet/ --json
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -143,9 +144,12 @@ Manual timestamp receipts can be imported offline:
 
 ```bash
 python -m tohupono timestamp import proof_packet/ ./receipt.bin --type manual --json
+python -m tohupono timestamp verify proof_packet/ --policy evidence_review --json
 ```
 
 Imported receipts are recorded as `unverified` unless TohuPono can verify the receipt format and external timestamp service. A receipt hash records the attached receipt bytes; it does not prove external timestamp validity by itself.
+
+Timestamp verification policies are `permissive`, `evidence_review` (default), and `strict_external`. The default policy treats local-only timestamps and unverified imported receipts as WARN, while receipt conflicts such as target-digest mismatch or receipt-byte hash mismatch are FAIL. `strict_external` requires verified external timestamp evidence and fails local-only or unverified receipt state.
 
 ## Claim Maturity
 

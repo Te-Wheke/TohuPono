@@ -7,8 +7,11 @@
 - Added manifest `timestamping` metadata with `local_only` status for locally created proof packets.
 - Added `tohupono timestamp inspect <packet>` human and JSON diagnostics.
 - Added offline `tohupono timestamp import <packet> <receipt-file>` receipt metadata import.
+- Added `tohupono timestamp verify <packet>` with permissive, evidence-review, and strict-external policies.
 - Added timestamp receipt type/status vocabulary and receipt SHA-256 recording.
+- Added receipt conflict diagnostics for target mismatch, missing stored receipt bytes, receipt hash mismatch, duplicate IDs, unsupported types, and invalid statuses.
 - Added audit warnings for imported but unverified timestamp receipts.
+- Added audit FAIL integration for corrupted timestamp receipt metadata under the default evidence-review policy.
 - Added audit reporting for missing and local-only timestamp states as `WARN`, not `FAIL`.
 - Documented timestamp status vocabulary, imported receipt limits, local-only limits, and planned OpenTimestamps/RFC 3161 adapters.
 

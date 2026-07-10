@@ -12,6 +12,11 @@ from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
 from tohupono.timestamping.model import (
+    DEFAULT_TIMESTAMP_POLICY,
+    LOCAL_TIMESTAMP_WARNING,
+    MISSING_TIMESTAMP_WARNING,
+    TIMESTAMP_POLICIES,
+    TIMESTAMP_RECEIPT_STATUSES,
     TIMESTAMP_RECEIPT_TYPES,
     UNVERIFIED_RECEIPT_WARNING,
     TimestampReceipt,
@@ -445,6 +450,133 @@ def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str
     }
 
 
+def timestamp_verification_diagnostics(
+    packet: Path,
+    policy: str = DEFAULT_TIMESTAMP_POLICY,
+) -> dict[str, Any]:
+    if policy not in TIMESTAMP_POLICIES:
+        raise ValueError(f"Unsupported timestamp policy: {policy}")
+    manifest_path = resolve_packet_manifest(packet)
+    proof_dir = manifest_path.parent
+    manifest = load_manifest(manifest_path)
+    file_info = manifest.get("file", {})
+    if not isinstance(file_info, dict) or not file_info.get("sha256"):
+        raise ValueError("Proof manifest does not contain a target file digest.")
+    manifest_digest = str(file_info["sha256"])
+    timestamping = inspect_manifest_timestamping(manifest)
+    timestamp_status = str(timestamping.get("status", "missing"))
+    warnings: list[str] = []
+    failures: list[str] = []
+    checks: list[dict[str, str]] = []
+
+    if timestamp_status == "anchored":
+        checks.append({"status": "PASS", "message": "timestamp proof is externally anchored."})
+    elif timestamp_status == "local_only":
+        message = "timestamp is local-only and not externally anchored."
+        if policy == "strict_external":
+            failures.append("timestamp_local_only")
+            checks.append({"status": "FAIL", "message": message})
+        else:
+            warnings.append(LOCAL_TIMESTAMP_WARNING)
+            checks.append({"status": "WARN", "message": message})
+    elif timestamp_status == "missing":
+        message = "no timestamp proof is present."
+        if policy == "strict_external":
+            failures.append("timestamp_missing")
+            checks.append({"status": "FAIL", "message": message})
+        else:
+            warnings.append(MISSING_TIMESTAMP_WARNING)
+            checks.append({"status": "WARN", "message": message})
+    else:
+        message = f"Timestamp status is {timestamp_status}."
+        failures.append(f"timestamp_{timestamp_status}")
+        checks.append({"status": "FAIL", "message": message})
+
+    receipts = list_timestamp_receipts(manifest_path)
+    seen_receipt_ids: set[str] = set()
+    verified_external_receipt = False
+    required_fields = {
+        "adapter_type",
+        "imported_at",
+        "receipt_id",
+        "receipt_path",
+        "receipt_sha256",
+        "receipt_size",
+        "receipt_status",
+        "receipt_type",
+        "target_digest",
+    }
+    for index, receipt in enumerate(receipts, start=1):
+        receipt_id = str(receipt.get("receipt_id") or f"receipt_{index}")
+        missing = sorted(required_fields - set(receipt))
+        if missing:
+            failures.append(f"{receipt_id}_metadata_missing_fields")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": f"timestamp receipt metadata missing required fields: {', '.join(missing)}.",
+                }
+            )
+            continue
+        if receipt_id in seen_receipt_ids:
+            failures.append("timestamp_receipt_duplicate_id")
+            checks.append({"status": "FAIL", "message": "duplicate timestamp receipt_id detected."})
+        seen_receipt_ids.add(receipt_id)
+        if receipt.get("receipt_type") not in TIMESTAMP_RECEIPT_TYPES:
+            failures.append(f"{receipt_id}_unsupported_receipt_type")
+            checks.append({"status": "FAIL", "message": "unsupported timestamp receipt type."})
+        if receipt.get("receipt_status") not in TIMESTAMP_RECEIPT_STATUSES:
+            failures.append(f"{receipt_id}_invalid_receipt_status")
+            checks.append({"status": "FAIL", "message": "timestamp receipt status is invalid."})
+        if str(receipt.get("target_digest")) != manifest_digest:
+            failures.append(f"{receipt_id}_target_digest_mismatch")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": "timestamp receipt target digest does not match packet manifest digest.",
+                }
+            )
+        receipt_path_value = receipt.get("receipt_path")
+        receipt_path = proof_dir / str(receipt_path_value)
+        if not receipt_path.exists() or not receipt_path.is_file():
+            failures.append(f"{receipt_id}_stored_file_missing")
+            checks.append({"status": "FAIL", "message": "timestamp receipt file is missing from packet storage."})
+        else:
+            actual_sha256 = _file_sha256(receipt_path)
+            if str(receipt.get("receipt_sha256")) != actual_sha256:
+                failures.append(f"{receipt_id}_sha256_mismatch")
+                checks.append({"status": "FAIL", "message": "timestamp receipt SHA-256 does not match stored bytes."})
+        if receipt.get("receipt_status") == "verified":
+            verified_external_receipt = True
+        elif receipt.get("receipt_status") == "unverified":
+            message = "imported timestamp receipt is present but not externally verified by TohuPono."
+            if policy == "strict_external":
+                failures.append(f"{receipt_id}_unverified_under_strict_external")
+                checks.append({"status": "FAIL", "message": message})
+            else:
+                warnings.append(UNVERIFIED_RECEIPT_WARNING)
+                checks.append({"status": "WARN", "message": message})
+
+    if policy == "strict_external" and timestamp_status != "anchored" and not verified_external_receipt:
+        failures.append("strict_external_timestamp_missing")
+        checks.append({"status": "FAIL", "message": "strict_external policy requires a verified external timestamp."})
+
+    status = "fail" if failures else ("warn" if warnings else "pass")
+    return {
+        "checks": checks,
+        "failure_count": len(failures),
+        "failures": failures,
+        "policy": policy,
+        "receipt_count": len(receipts),
+        "receipts": receipts,
+        "status": status,
+        "timestamping": timestamping,
+        "timestamping_status": timestamp_status,
+        "warning_count": len(warnings),
+        "warnings": warnings,
+    }
+
+
 def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
     manifest_path = resolve_packet_manifest(packet)
     proof_dir = manifest_path.parent
@@ -550,28 +682,14 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
             key_warnings.append(message)
             warnings.append(f"{purpose}_key_compromise_review")
 
-    timestamping = inspect_manifest_timestamping(manifest)
-    timestamp_receipts = list_timestamp_receipts(manifest_path)
-    timestamp_status = str(timestamping.get("status"))
-    if timestamp_status == "local_only":
-        checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
-        warnings.append("timestamp_local_only")
-    elif timestamp_status == "missing":
-        checks.append({"status": "WARN", "message": "no timestamp proof is present."})
-        warnings.append("timestamp_missing")
-    elif timestamp_status == "anchored":
-        checks.append({"status": "PASS", "message": "timestamp proof is externally anchored."})
-    else:
-        checks.append({"status": "WARN", "message": f"timestamp status is {timestamp_status}."})
-        warnings.append(f"timestamp_{timestamp_status}")
-    if any(receipt.get("receipt_status") == "unverified" for receipt in timestamp_receipts):
-        checks.append(
-            {
-                "status": "WARN",
-                "message": "imported timestamp receipt is present but not externally verified by TohuPono.",
-            }
-        )
-        warnings.append("timestamp_receipt_unverified")
+    timestamp_diagnostics = timestamp_verification_diagnostics(manifest_path, DEFAULT_TIMESTAMP_POLICY)
+    checks.extend(
+        {"status": str(check.get("status")), "message": str(check.get("message"))}
+        for check in timestamp_diagnostics.get("checks", [])
+        if isinstance(check, dict)
+    )
+    failures.extend(str(failure) for failure in timestamp_diagnostics.get("failures", []))
+    warnings.extend(str(warning) for warning in timestamp_diagnostics.get("warnings", []))
     status = "fail" if failures else ("warn" if warnings else "pass")
     return {
         "checks": checks,
@@ -584,9 +702,10 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,
         "status": status,
-        "timestamp_receipts": timestamp_receipts,
-        "timestamping": timestamping,
-        "timestamp_status": timestamp_status,
+        "timestamp_diagnostics": timestamp_diagnostics,
+        "timestamp_receipts": timestamp_diagnostics.get("receipts", []),
+        "timestamping": timestamp_diagnostics.get("timestamping"),
+        "timestamp_status": timestamp_diagnostics.get("timestamping_status"),
         "warnings": warnings,
     }
 
