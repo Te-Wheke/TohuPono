@@ -33,6 +33,7 @@ Inspect configured key purposes:
 ```bash
 python -m tohupono key inspect
 python -m tohupono key inspect --purpose manifest --json
+python -m tohupono key inspect --purpose manifest --output-dir /path/to/key-workspace --json
 ```
 
 Check local key hygiene:
@@ -40,6 +41,7 @@ Check local key hygiene:
 ```bash
 python -m tohupono key check
 python -m tohupono key check --json
+python -m tohupono key check --output-dir /path/to/key-workspace --json
 ```
 
 Missing keys are warnings unless an operation currently needs the key. This lets a fresh offline workspace inspect its configuration before first signing.
@@ -62,5 +64,9 @@ keys/key_compromise_log.jsonl
 ```
 
 These logs are local trust records. They must not be committed with private keys, generated proof packets, generated reports, or signatures.
+
+A key workspace is the directory containing purpose key files and lifecycle metadata logs. The default workspace is `keys/`. If keys are created, rotated, or marked compromised with `--output-dir`, use the same `--output-dir` when running `key inspect` or `key check`; otherwise those commands read the default `keys/` workspace.
+
+Missing key workspaces are handled as empty local workspaces. Inspection and check commands report missing-key warnings instead of creating files or failing.
 
 The current signing backend uses the system OpenSSL CLI with Ed25519 keys. This uses a reviewed cryptographic implementation and is not custom cryptography.

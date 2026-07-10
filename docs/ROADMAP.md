@@ -7,6 +7,8 @@
 - local key creation by explicit purpose;
 - key rotation metadata without deleting old keys;
 - key compromise metadata with WARN-level trust-policy review prompts;
+- key workspace-aware inspect/check commands;
+- packet audit warnings for visible compromised-key metadata;
 - continued separation of manifest, report, amendment, witness, release, and test key purposes.
 
 ## v0.3.0

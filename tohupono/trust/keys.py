@@ -203,65 +203,87 @@ def _entries_for_purpose(path: Path, purpose: str, event_type: str) -> list[dict
     ]
 
 
-def _path_warnings(path: Path, *, private: bool) -> list[str]:
+def _path_warnings(path: Path, *, private: bool, output_dir: Path | None = None) -> list[str]:
     warnings: list[str] = []
     normalized = path.as_posix()
-    if private and not normalized.startswith("keys/") and not normalized.startswith("tests/"):
+    if (
+        private
+        and output_dir is None
+        and not normalized.startswith("keys/")
+        and not normalized.startswith("tests/")
+    ):
         warnings.append("private key path is outside the expected local key directories")
     if any(part in path.parts for part in [".git", ".ssh"]):
         warnings.append("key path is inside a forbidden location")
     return warnings
 
 
-def inspect_key_purpose(purpose: KeyPurpose) -> dict[str, object]:
-    private_exists = purpose.private_key_path.exists()
-    public_exists = purpose.public_key_path.exists()
-    rotation_entries = _entries_for_purpose(DEFAULT_ROTATION_LOG, purpose.purpose, "KEY_ROTATED")
-    compromise_entries = _entries_for_purpose(DEFAULT_COMPROMISE_LOG, purpose.purpose, "KEY_COMPROMISED")
+def key_lifecycle_summary(purpose_name: str, output_dir: Path | None = None) -> dict[str, object]:
+    purpose = get_key_purpose(purpose_name)
+    rotation_entries = _entries_for_purpose(_rotation_log_path(output_dir), purpose.purpose, "KEY_ROTATED")
+    compromise_entries = _entries_for_purpose(_compromise_log_path(output_dir), purpose.purpose, "KEY_COMPROMISED")
     warnings: list[str] = []
+    if compromise_entries:
+        warnings.append(COMPROMISE_WARNING)
+    return {
+        "compromise_events": len(compromise_entries),
+        "latest_compromise_event_id": compromise_entries[-1].get("compromise_event_id") if compromise_entries else None,
+        "latest_rotation_event_id": rotation_entries[-1].get("rotation_event_id") if rotation_entries else None,
+        "rotation_events": len(rotation_entries),
+        "warnings": warnings,
+    }
+
+
+def inspect_key_purpose(purpose: KeyPurpose, output_dir: Path | None = None) -> dict[str, object]:
+    private_key, public_key = _paths_for_purpose(purpose, output_dir)
+    private_exists = private_key.exists()
+    public_exists = public_key.exists()
+    lifecycle = key_lifecycle_summary(purpose.purpose, output_dir)
+    warnings = [str(warning) for warning in lifecycle["warnings"]]
     if not private_exists:
         warnings.append("private key missing")
     if not public_exists:
         warnings.append("public key missing")
-    if compromise_entries:
-        warnings.append(COMPROMISE_WARNING)
-    warnings.extend(_path_warnings(purpose.private_key_path, private=True))
-    warnings.extend(_path_warnings(purpose.public_key_path, private=False))
+    warnings.extend(_path_warnings(private_key, private=True, output_dir=output_dir))
+    warnings.extend(_path_warnings(public_key, private=False, output_dir=output_dir))
     return {
         "allowed_operations": list(purpose.allowed_operations),
+        "compromise_event_count": lifecycle["compromise_events"],
+        "compromise_events": lifecycle["compromise_events"],
         "description": purpose.description,
         "private_key_exists": private_exists,
-        "private_key_path": str(purpose.private_key_path),
+        "private_key_path": str(private_key),
         "private_required_for_signing": purpose.private_required_for_signing,
         "public_key_exists": public_exists,
-        "public_key_path": str(purpose.public_key_path),
+        "public_key_path": str(public_key),
         "public_required_for_verification": purpose.public_required_for_verification,
         "purpose": purpose.purpose,
-        "rotation_event_count": len(rotation_entries),
-        "latest_rotation_event_id": rotation_entries[-1].get("rotation_event_id") if rotation_entries else None,
-        "compromise_event_count": len(compromise_entries),
-        "latest_compromise_event_id": compromise_entries[-1].get("compromise_event_id") if compromise_entries else None,
+        "rotation_event_count": lifecycle["rotation_events"],
+        "rotation_events": lifecycle["rotation_events"],
+        "latest_rotation_event_id": lifecycle["latest_rotation_event_id"],
+        "latest_compromise_event_id": lifecycle["latest_compromise_event_id"],
         "status": purpose.status,
         "warnings": warnings,
     }
 
 
-def inspect_keys(purpose: str | None = None) -> dict[str, object]:
-    keys = [inspect_key_purpose(item) for item in selected_key_purposes(purpose)]
-    return {"keys": keys, "status": "ok"}
+def inspect_keys(purpose: str | None = None, output_dir: Path | None = None) -> dict[str, object]:
+    keys = [inspect_key_purpose(item, output_dir) for item in selected_key_purposes(purpose)]
+    return {"keys": keys, "key_workspace": str(output_dir or Path("keys")), "status": "ok"}
 
 
-def check_key_purpose(purpose: KeyPurpose) -> dict[str, object]:
-    item = inspect_key_purpose(purpose)
+def check_key_purpose(purpose: KeyPurpose, output_dir: Path | None = None) -> dict[str, object]:
+    item = inspect_key_purpose(purpose, output_dir)
     warnings = [str(warning) for warning in item["warnings"]]
     failures: list[str] = []
     if purpose.private_required_for_signing and not item["private_key_exists"]:
         warnings.append("private key required for signing is missing")
     if purpose.public_required_for_verification and not item["public_key_exists"]:
         warnings.append("public key required for verification is missing")
-    if purpose.private_key_path.exists():
+    private_key, _ = _paths_for_purpose(purpose, output_dir)
+    if private_key.exists():
         try:
-            mode = purpose.private_key_path.stat().st_mode & 0o777
+            mode = private_key.stat().st_mode & 0o777
         except OSError as exc:
             warnings.append(f"could not inspect private key permissions: {exc}")
         else:
@@ -278,12 +300,13 @@ def check_key_purpose(purpose: KeyPurpose) -> dict[str, object]:
     }
 
 
-def check_keys(purpose: str | None = None) -> dict[str, object]:
-    keys = [check_key_purpose(item) for item in selected_key_purposes(purpose)]
+def check_keys(purpose: str | None = None, output_dir: Path | None = None) -> dict[str, object]:
+    keys = [check_key_purpose(item, output_dir) for item in selected_key_purposes(purpose)]
     openssl_ok = openssl_available()
     warnings = [] if openssl_ok else ["OpenSSL is unavailable"]
     status = "fail" if any(item["status"] == "fail" for item in keys) else ("warn" if warnings or any(item["status"] == "warn" for item in keys) else "ok")
     return {
+        "key_workspace": str(output_dir or Path("keys")),
         "keys": keys,
         "openssl_available": openssl_ok,
         "status": status,

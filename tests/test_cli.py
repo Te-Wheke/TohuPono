@@ -174,3 +174,25 @@ def test_v030_audit_command_reports_pass_warn_fail(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "PASS: manifest schema valid." in result.stdout
     assert "WARN: timestamp is local-only and not externally anchored." in result.stdout
+
+def test_audit_surfaces_manifest_key_compromise_warning(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("audit compromise warning\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    created = run_cli("key", "create", "--purpose", "manifest", "--json", cwd=tmp_path)
+    assert created.returncode == 0, created.stderr
+    compromised = run_cli(
+        "key",
+        "compromise",
+        "--purpose",
+        "manifest",
+        "--reason",
+        "audit warning test",
+        "--json",
+        cwd=tmp_path,
+    )
+    assert compromised.returncode == 0, compromised.stderr
+    result = run_cli("audit", str(proof_dir), cwd=tmp_path)
+    assert result.returncode == 0
+    assert "WARN: compromise metadata exists for the manifest key purpose." in result.stdout

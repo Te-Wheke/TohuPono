@@ -211,12 +211,14 @@ def _print_key_inspect_human(result: dict[str, object]) -> None:
         print(f"Public key path: {item['public_key_path']}")
         print(f"Public key exists: {'yes' if item['public_key_exists'] else 'no'}")
         print(f"Allowed operations: {', '.join(item['allowed_operations'])}")
+        print(f"Rotation events: {item.get('rotation_events', item.get('rotation_event_count', 0))}")
+        print(f"Compromise events: {item.get('compromise_events', item.get('compromise_event_count', 0))}")
         print(f"Status: {item['status']}")
         warnings = item.get("warnings") or []
         if warnings:
             print("Warnings:")
             for warning in warnings:
-                print(f"- {warning}")
+                print(f"WARN: {warning}")
         print("")
 
 
@@ -227,6 +229,8 @@ def _print_key_check_human(result: dict[str, object]) -> None:
         if not isinstance(item, dict):
             continue
         print(f"Purpose: {item['purpose']}")
+        print(f"Rotation events: {item.get('rotation_events', item.get('rotation_event_count', 0))}")
+        print(f"Compromise events: {item.get('compromise_events', item.get('compromise_event_count', 0))}")
         print(f"Status: {item['status']}")
         for warning in item.get("warnings") or []:
             print(f"WARN: {warning}")
@@ -309,9 +313,11 @@ def build_parser() -> argparse.ArgumentParser:
     key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
     key_inspect_cmd = key_sub.add_parser("inspect", help="Inspect configured key purposes.")
     key_inspect_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_inspect_cmd.add_argument("--output-dir")
     key_inspect_cmd.add_argument("--json", action="store_true")
     key_check_cmd = key_sub.add_parser("check", help="Check local key hygiene.")
     key_check_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_check_cmd.add_argument("--output-dir")
     key_check_cmd.add_argument("--json", action="store_true")
     key_create_cmd = key_sub.add_parser("create", help="Create a local Ed25519 keypair for a purpose.")
     key_create_cmd.add_argument("--purpose", required=True, choices=key_purpose_names())
@@ -429,14 +435,16 @@ def run(argv: Sequence[str] | None = None) -> int:
             return EXIT_SUCCESS if result["status"] != "fail" else EXIT_VERIFICATION_FAILED
         elif args.command == "key":
             if args.key_command == "inspect":
-                result = inspect_keys(args.purpose)
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = inspect_keys(args.purpose, output_dir=output_dir)
                 if args.json:
                     _print_json(result)
                 else:
                     _print_key_inspect_human(result)
                 return EXIT_SUCCESS
             if args.key_command == "check":
-                result = check_keys(args.purpose)
+                output_dir = Path(args.output_dir) if args.output_dir else None
+                result = check_keys(args.purpose, output_dir=output_dir)
                 if args.json:
                     _print_json(result)
                 else:

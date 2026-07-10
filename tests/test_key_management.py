@@ -202,6 +202,148 @@ def test_key_check_warns_when_compromise_metadata_exists(tmp_path: Path) -> None
     warnings = data["keys"][0]["warnings"]
     assert COMPROMISE_WARNING in warnings
     assert data["keys"][0]["compromise_event_count"] == 1
+    assert data["keys"][0]["compromise_events"] == 1
+
+
+def test_key_inspect_output_dir_reads_workspace_keys(tmp_path: Path) -> None:
+    key_dir = tmp_path / "workspace_keys"
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert created.returncode == 0, created.stderr
+
+    result = run_cli(
+        "key",
+        "inspect",
+        "--purpose",
+        "manifest",
+        "--output-dir",
+        str(key_dir),
+        "--json",
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    item = data["keys"][0]
+    assert data["key_workspace"] == str(key_dir)
+    assert item["purpose"] == "manifest"
+    assert item["private_key_path"] == str(key_dir / "manifest_signing_key.pem")
+    assert item["public_key_path"] == str(key_dir / "manifest_signing_key.pub")
+    assert item["private_key_exists"] is True
+    assert item["public_key_exists"] is True
+
+
+def test_key_check_output_dir_reads_lifecycle_metadata(tmp_path: Path) -> None:
+    key_dir = tmp_path / "workspace_keys"
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert created.returncode == 0, created.stderr
+    rotated = run_cli(
+        "key",
+        "rotate",
+        "--purpose",
+        "manifest",
+        "--reason",
+        "workspace rotation",
+        "--output-dir",
+        str(key_dir),
+        "--json",
+    )
+    assert rotated.returncode == 0, rotated.stderr
+    compromised = run_cli(
+        "key",
+        "compromise",
+        "--purpose",
+        "manifest",
+        "--reason",
+        "workspace compromise",
+        "--output-dir",
+        str(key_dir),
+        "--json",
+    )
+    assert compromised.returncode == 0, compromised.stderr
+
+    result = run_cli("key", "check", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    item = data["keys"][0]
+    assert item["rotation_events"] == 1
+    assert item["compromise_events"] == 1
+    assert item["latest_rotation_event_id"] == json.loads(rotated.stdout)["rotation_event_id"]
+    assert item["latest_compromise_event_id"] == json.loads(compromised.stdout)["compromise_event_id"]
+    assert COMPROMISE_WARNING in item["warnings"]
+
+
+def test_key_inspect_json_includes_lifecycle_counts(tmp_path: Path) -> None:
+    key_dir = tmp_path / "workspace_keys"
+    assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json").returncode == 0
+    assert (
+        run_cli(
+            "key",
+            "rotate",
+            "--purpose",
+            "manifest",
+            "--reason",
+            "count rotation",
+            "--output-dir",
+            str(key_dir),
+            "--json",
+        ).returncode
+        == 0
+    )
+    assert (
+        run_cli(
+            "key",
+            "compromise",
+            "--purpose",
+            "manifest",
+            "--reason",
+            "count compromise",
+            "--output-dir",
+            str(key_dir),
+            "--json",
+        ).returncode
+        == 0
+    )
+    result = run_cli("key", "inspect", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert result.returncode == 0, result.stderr
+    item = json.loads(result.stdout)["keys"][0]
+    assert item["rotation_events"] == 1
+    assert item["compromise_events"] == 1
+    assert item["latest_rotation_event_id"]
+    assert item["latest_compromise_event_id"]
+
+
+def test_key_inspect_output_dir_human_mode_does_not_print_private_key_contents(tmp_path: Path) -> None:
+    key_dir = tmp_path / "workspace_keys"
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert created.returncode == 0, created.stderr
+    compromised = run_cli(
+        "key",
+        "compromise",
+        "--purpose",
+        "manifest",
+        "--reason",
+        "human warning",
+        "--output-dir",
+        str(key_dir),
+        "--json",
+    )
+    assert compromised.returncode == 0, compromised.stderr
+    result = run_cli("key", "inspect", "--purpose", "manifest", "--output-dir", str(key_dir))
+    assert result.returncode == 0, result.stderr
+    assert "Rotation events: 0" in result.stdout
+    assert "Compromise events: 1" in result.stdout
+    assert f"WARN: {COMPROMISE_WARNING}" in result.stdout
+    assert "BEGIN PRIVATE KEY" not in result.stdout
+
+
+def test_key_inspect_output_dir_missing_workspace_is_sane(tmp_path: Path) -> None:
+    key_dir = tmp_path / "missing_keys"
+    result = run_cli("key", "inspect", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert result.returncode == 0, result.stderr
+    item = json.loads(result.stdout)["keys"][0]
+    assert item["private_key_exists"] is False
+    assert item["public_key_exists"] is False
+    assert item["rotation_events"] == 0
+    assert item["compromise_events"] == 0
 
 
 def test_key_inspect_and_check_do_not_print_private_key_contents(tmp_path: Path) -> None:

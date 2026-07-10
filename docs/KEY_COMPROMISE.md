@@ -16,6 +16,7 @@ Record local compromise metadata:
 ```bash
 python -m tohupono key compromise --purpose manifest --reason "suspected exposure"
 python -m tohupono key compromise --purpose report --reason "lost device review" --json
+python -m tohupono key compromise --purpose manifest --reason "workspace marker" --output-dir /path/to/key-workspace --json
 ```
 
 The command does not delete keys and does not modify old proof packets. It appends a JSONL record to:
@@ -40,6 +41,13 @@ When compromise metadata exists for a purpose, `key inspect` and `key check` war
 WARN: compromise metadata exists for this key purpose. Existing signatures may require review under the applicable trust policy.
 ```
 
+Use the same key workspace for inspection/checking that was used when recording compromise metadata:
+
+```bash
+python -m tohupono key inspect --purpose manifest --output-dir /path/to/key-workspace
+python -m tohupono key check --purpose manifest --output-dir /path/to/key-workspace --json
+```
+
 Key compromise should be treated as at least `WARN` for affected evidence strength. It may become `FAIL` for workflows that require a trustworthy signature from that purpose.
 
-Do not delete old proof packets to hide compromise. Preserve them and add clear context.
+Compromise is a trust-policy review trigger, not automatic proof destruction. Do not delete old proof packets to hide compromise. Preserve them and add clear context. Future trust policies may choose stricter enforcement for specific workflows.

@@ -430,6 +430,18 @@ def packet_diagnostics(packet: Path) -> dict[str, Any]:
         checks.append({"status": "FAIL", "message": "report signature invalid."})
         failures.append("report_signature_invalid")
 
+    from tohupono.trust.keys import key_lifecycle_summary
+
+    for purpose in ["manifest", "report", "amendment"]:
+        lifecycle = key_lifecycle_summary(purpose)
+        if int(lifecycle.get("compromise_events", 0)):
+            message = (
+                f"compromise metadata exists for the {purpose} key purpose. "
+                "Existing signatures may require review under the applicable trust policy."
+            )
+            checks.append({"status": "WARN", "message": message})
+            warnings.append(f"{purpose}_key_compromise_review")
+
     checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
     warnings.append("timestamp_local_only")
     status = "fail" if failures else ("warn" if warnings else "pass")

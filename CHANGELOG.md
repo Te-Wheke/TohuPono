@@ -8,6 +8,8 @@
 - Added `tohupono key create` for local OpenSSL Ed25519 keypair creation by purpose.
 - Added `tohupono key rotate` with JSONL rotation metadata and no old-key deletion.
 - Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
+- Added `--output-dir` support to `key inspect` and `key check` for workspace-aware key diagnostics.
+- Added packet audit WARN output for local compromised-key metadata where visible.
 - Documented key management, rotation, and compromise handling.
 - Kept OpenSSL CLI Ed25519 signing and existing default key paths.
 
