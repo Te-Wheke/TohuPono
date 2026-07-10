@@ -13,6 +13,9 @@ tohupono inspect ./file.pdf
 tohupono hash ./file.pdf --algorithm sha256
 tohupono prove ./file.pdf --output proof_packet/
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --output verification_report.md
+tohupono verify ./file.pdf --proof proof_packet/manifest.json --json
+tohupono verify-chain proof_packet/evidence_chain.jsonl --json
+tohupono inspect-proof proof_packet/manifest.json --json
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -47,6 +50,11 @@ The v0.2.0 cycle hardens deterministic proof lineage for any file type.
 - Proof IDs are derived from canonical seed data: schema version, tool version, file SHA-256, file size, sealed timestamp, and manifest version.
 - `evidence_chain.jsonl` events include canonical event hashes and previous-event links.
 - Manifest keys sign proof manifests. Report keys sign final PDF bytes. These keys must remain separate.
+- `verify --json` emits deterministic structured diagnostics for automation.
+- `verify-chain` checks standalone evidence-chain JSONL files.
+- `inspect-proof` inspects proof packet metadata without verifying a source file.
+
+Inspecting a proof is not the same as verifying a source file. `inspect-proof` reports manifest and packet status only. `verify` compares a supplied file's byte digest with the proof manifest.
 
 ## Proof Packet
 
@@ -71,6 +79,12 @@ Evidence-chain hashes make recorded events tamper-evident under the local proof 
 - `VERIFIED_INTEGRITY`: current digest matches the sealed digest.
 - `ALTERED_AFTER_PROOF`: current digest differs from the sealed digest.
 - `UNPROVEN`: available evidence is insufficient.
+
+Manifest signature status values are `valid`, `missing`, `invalid`, `unverified`, and `error`.
+
+Evidence-chain status values are `valid`, `missing`, `invalid`, and `error`.
+
+Legal-support boundary: This report supports evidence review by recording deterministic file identity, verification results, signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, or legal admissibility.
 
 ## Offline Default
 

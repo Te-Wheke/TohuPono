@@ -14,6 +14,7 @@ from tohupono.core.proof import (
     GENESIS_EVENT_HASH,
     build_evidence_event,
     create_proof_packet,
+    evidence_chain_diagnostics,
     event_hash,
     load_manifest,
     make_proof_id,
@@ -49,6 +50,8 @@ def test_cli_help() -> None:
     result = run_cli("--help")
     assert result.returncode == 0
     assert "tohupono" in result.stdout
+    for command in ["inspect", "hash", "prove", "verify", "verify-chain", "inspect-proof", "report"]:
+        assert command in result.stdout
 
 
 def test_hash_stability(tmp_path: Path) -> None:
@@ -255,6 +258,32 @@ def test_evidence_chain_verification_detects_tampering(tmp_path: Path) -> None:
     assert "event_1_hash_mismatch" in errors
 
 
+def test_evidence_chain_diagnostics_missing_and_malformed(tmp_path: Path) -> None:
+    missing = evidence_chain_diagnostics(tmp_path / "missing.jsonl")
+    assert missing["status"] == "missing"
+    malformed_path = tmp_path / "bad.jsonl"
+    malformed_path.write_text("{not-json\n", encoding="utf-8")
+    malformed = evidence_chain_diagnostics(malformed_path)
+    assert malformed["status"] == "invalid"
+    assert "event_1_invalid_json" in malformed["errors"]
+
+
+def test_evidence_chain_diagnostics_missing_required_field(tmp_path: Path) -> None:
+    event = build_evidence_event(
+        event_type="sealed",
+        timestamp="2026-07-10T00:00:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash=GENESIS_EVENT_HASH,
+    )
+    del event["actor"]
+    chain = tmp_path / "evidence_chain.jsonl"
+    chain.write_text(canonical_json_text(event) + "\n", encoding="utf-8")
+    result = evidence_chain_diagnostics(chain)
+    assert result["status"] == "invalid"
+    assert "event_1_missing_actor" in result["errors"]
+
+
 def test_evidence_chain_links_previous_event_hash(tmp_path: Path) -> None:
     first = build_evidence_event(
         event_type="sealed",
@@ -366,3 +395,130 @@ def test_cli_end_to_end_default_report_key(tmp_path: Path) -> None:
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.sig").exists()
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.pub").exists()
     assert (tmp_path / "keys" / "report_signing_key.pem").exists()
+
+
+def test_verify_json_returns_required_keys(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    copied = tmp_path / "copied.txt"
+    sample.write_text("slice two bytes\n", encoding="utf-8")
+    copied.write_text("slice two bytes\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli("verify", str(copied), "--proof", str(proof_dir / "manifest.json"), "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert set(
+        [
+            "verdict",
+            "classification",
+            "file_sha256",
+            "expected_sha256",
+            "manifest_signature_status",
+            "evidence_chain_status",
+            "warnings",
+            "reasons",
+            "notes",
+        ]
+    ).issubset(data)
+    assert data["verdict"] == VERIFIED_INTEGRITY
+    assert data["manifest_signature_status"] == "valid"
+    assert data["evidence_chain_status"] == "valid"
+    assert PATH_DIFFERS_NOTE in data["notes"]
+
+
+def test_verify_chain_cli_human_and_json(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("chain\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    chain = proof_dir / "evidence_chain.jsonl"
+    human = run_cli("verify-chain", str(chain))
+    assert human.returncode == 0, human.stderr
+    assert "Evidence chain status: valid" in human.stdout
+    machine = run_cli("verify-chain", str(chain), "--json")
+    assert machine.returncode == 0, machine.stderr
+    data = json.loads(machine.stdout)
+    assert data["status"] == "valid"
+    assert data["event_count"] == 1
+
+
+def test_verify_chain_cli_reports_broken_previous_hash(tmp_path: Path) -> None:
+    first = build_evidence_event(
+        event_type="sealed",
+        timestamp="2026-07-10T00:00:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash=GENESIS_EVENT_HASH,
+    )
+    second = build_evidence_event(
+        event_type="witnessed",
+        timestamp="2026-07-10T00:01:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash="broken",
+    )
+    chain = tmp_path / "evidence_chain.jsonl"
+    chain.write_text(canonical_json_text(first) + "\n" + canonical_json_text(second) + "\n", encoding="utf-8")
+    result = run_cli("verify-chain", str(chain), "--json")
+    data = json.loads(result.stdout)
+    assert data["status"] == "invalid"
+    assert "event_2_previous_hash_mismatch" in data["errors"]
+
+
+def test_inspect_proof_cli_human_and_json(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("inspect\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    manifest = proof_dir / "manifest.json"
+    human = run_cli("inspect-proof", str(manifest))
+    assert human.returncode == 0, human.stderr
+    assert "Proof manifest inspected. Source file was not verified in this command." in human.stdout
+    assert "Proof ID:" in human.stdout
+    machine = run_cli("inspect-proof", str(manifest), "--json")
+    assert machine.returncode == 0, machine.stderr
+    data = json.loads(machine.stdout)
+    assert data["proof_id"]
+    assert data["manifest_signature_status"] == "valid"
+    assert data["evidence_chain_status"] == "valid"
+    assert data["boundary"] == "Proof manifest inspected. Source file was not verified in this command."
+
+
+def test_markdown_report_has_required_sections(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("markdown\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    report = tmp_path / "verification_report.md"
+    result = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--output", str(report))
+    assert result.returncode == 0, result.stderr
+    text = report.read_text(encoding="utf-8")
+    for section in [
+        "# TohuPono Verification Report",
+        "## Verdict",
+        "## File Identity",
+        "## Manifest Signature",
+        "## Evidence Chain",
+        "## Notes",
+        "## Warnings",
+        "## Reasons",
+        "## Legal-Support Boundary",
+    ]:
+        assert section in text
+    assert (
+        "This report supports evidence review by recording deterministic file identity, verification results, "
+        "signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, "
+        "or legal admissibility."
+    ) in text
+
+
+def test_modified_source_bytes_still_altered_after_proof_with_valid_signature(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("before\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    sample.write_text("after\n", encoding="utf-8")
+    result = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--json")
+    data = json.loads(result.stdout)
+    assert data["verdict"] == ALTERED_AFTER_PROOF
+    assert data["manifest_signature_status"] == "valid"

@@ -6,7 +6,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
@@ -16,6 +16,11 @@ from tohupono.trust.keys import DEFAULT_MANIFEST_KEY, DEFAULT_MANIFEST_PUBLIC_KE
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
 MANIFEST_VERSION = "0.2.0-dev"
 GENESIS_EVENT_HASH = "GENESIS"
+CHAIN_STATUS_VALID = "valid"
+CHAIN_STATUS_MISSING = "missing"
+CHAIN_STATUS_INVALID = "invalid"
+CHAIN_STATUS_ERROR = "error"
+ChainStatus = Literal["valid", "missing", "invalid", "error"]
 
 
 @dataclass(frozen=True)
@@ -125,8 +130,33 @@ def verify_evidence_chain(path: Path) -> tuple[bool, list[str]]:
             errors.append(f"event_{index}_hash_mismatch")
         previous_hash = str(event.get("event_hash"))
     return not errors, errors
-    digest = hashlib.sha256(canonical_json_bytes(source)).hexdigest()
-    return f"tp_{digest[:32]}"
+
+
+def evidence_chain_diagnostics(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {
+            "status": CHAIN_STATUS_MISSING,
+            "path": str(path),
+            "errors": ["evidence_chain_missing"],
+            "event_count": 0,
+        }
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        ok, errors = verify_evidence_chain(path)
+    except OSError as exc:
+        return {
+            "status": CHAIN_STATUS_ERROR,
+            "path": str(path),
+            "errors": [str(exc)],
+            "event_count": 0,
+        }
+    event_count = sum(1 for line in lines if line.strip())
+    return {
+        "status": CHAIN_STATUS_VALID if ok else CHAIN_STATUS_INVALID,
+        "path": str(path),
+        "errors": errors,
+        "event_count": event_count,
+    }
 
 
 def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:

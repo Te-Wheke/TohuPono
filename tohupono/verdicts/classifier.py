@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from tohupono.core.file_identity import inspect_file
-from tohupono.core.proof import load_manifest, verify_evidence_chain, write_json
+from tohupono.core.proof import evidence_chain_diagnostics, load_manifest, write_json
 from tohupono.trust.keys import verify_signature
 
 VERIFIED_INTEGRITY = "VERIFIED_INTEGRITY"
@@ -19,6 +19,11 @@ MANIFEST_SIGNATURE_UNVERIFIED = "unverified"
 MANIFEST_SIGNATURE_ERROR = "error"
 PATH_DIFFERS_NOTE = (
     "Current file digest matches proof manifest. Observed path differs; path is metadata, not identity."
+)
+LEGAL_SUPPORT_BOUNDARY = (
+    "This report supports evidence review by recording deterministic file identity, verification results, "
+    "signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, "
+    "or legal admissibility."
 )
 
 
@@ -38,6 +43,19 @@ class VerificationResult:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+    def to_cli_json(self) -> dict[str, object]:
+        return {
+            "classification": self.verdict,
+            "evidence_chain_status": self.evidence_chain_status,
+            "expected_sha256": self.manifest_sha256,
+            "file_sha256": self.file_sha256,
+            "manifest_signature_status": self.manifest_signature_status,
+            "notes": self.notes,
+            "reasons": self.reasons,
+            "verdict": self.verdict,
+            "warnings": self.warnings,
+        }
 
 
 def manifest_signature_status(proof: Path) -> str:
@@ -85,15 +103,10 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             },
             evidence_chain_status="unverified",
         )
-    chain_path = proof.parent / "evidence_chain.jsonl"
-    if chain_path.exists():
-        chain_ok, chain_errors = verify_evidence_chain(chain_path)
-        evidence_chain_status = "valid" if chain_ok else "invalid"
-        if chain_errors:
-            warnings.extend(chain_errors)
-    else:
-        evidence_chain_status = "missing"
-        warnings.append("evidence_chain_missing")
+    chain_result = evidence_chain_diagnostics(proof.parent / "evidence_chain.jsonl")
+    evidence_chain_status = str(chain_result["status"])
+    chain_errors = [str(error) for error in chain_result["errors"]]
+    warnings.extend(chain_errors)
     if not isinstance(manifest_file, dict) or not manifest_file.get("sha256"):
         return VerificationResult(
             verdict=UNPROVEN,
@@ -145,21 +158,48 @@ def write_verdict(proof: Path, result: VerificationResult) -> Path:
 
 
 def write_markdown(path: Path, result: VerificationResult) -> None:
+    notes = result.notes or ["None."]
+    warnings = result.warnings or ["None."]
+    reasons = result.reasons or ["None."]
     text = "\n".join(
         [
             "# TohuPono Verification Report",
             "",
-            "This is an evidence-based verification summary for a legal-support evidence bundle.",
+            "## Verdict",
             "",
             f"Verdict: `{result.verdict}`",
             f"Proof ID: `{result.proof_id or 'unknown'}`",
+            "",
+            "## File Identity",
+            "",
             f"Current SHA-256: `{result.file_sha256 or 'unknown'}`",
-            f"Manifest SHA-256: `{result.manifest_sha256 or 'unknown'}`",
+            f"Expected SHA-256: `{result.manifest_sha256 or 'unknown'}`",
+            "",
+            "## Manifest Signature",
+            "",
             f"Manifest signature status: `{result.manifest_signature_status}`",
+            "",
+            "## Evidence Chain",
+            "",
             f"Evidence chain status: `{result.evidence_chain_status}`",
             "",
             result.summary,
-            *result.notes,
+            "",
+            "## Notes",
+            "",
+            *notes,
+            "",
+            "## Warnings",
+            "",
+            *warnings,
+            "",
+            "## Reasons",
+            "",
+            *reasons,
+            "",
+            "## Legal-Support Boundary",
+            "",
+            LEGAL_SUPPORT_BOUNDARY,
             "",
         ]
     )

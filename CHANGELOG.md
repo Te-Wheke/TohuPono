@@ -8,6 +8,10 @@
 - Clarified that file digest is identity; path, filename, extension, and MIME are metadata only.
 - Added verification notes for copied or renamed files whose byte digest still matches.
 - Extended manifest signature status handling for valid, missing, invalid, unverified, and error states.
+- Added `verify --json` structured verification output.
+- Added `verify-chain` human and JSON diagnostics for standalone evidence chains.
+- Added `inspect-proof` human and JSON proof manifest inspection without source-file verification.
+- Strengthened Markdown verification reports with explicit signature, chain, notes, warnings, reasons, and legal-support sections.
 - Preserved manifest-key and report-key separation.
 - Preserved local-first/offline operation and legal-support evidence bundle language.
 
