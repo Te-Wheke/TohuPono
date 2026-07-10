@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from tohupono.core.file_identity import inspect_file
-from tohupono.core.proof import load_manifest, write_json
+from tohupono.core.proof import load_manifest, verify_evidence_chain, write_json
 from tohupono.trust.keys import verify_signature
 
 VERIFIED_INTEGRITY = "VERIFIED_INTEGRITY"
@@ -15,6 +15,11 @@ MANIFEST_SIGNATURE_MISSING = "manifest_signature_missing"
 MANIFEST_SIGNATURE_VALID = "valid"
 MANIFEST_SIGNATURE_MISSING_STATUS = "missing"
 MANIFEST_SIGNATURE_INVALID = "invalid"
+MANIFEST_SIGNATURE_UNVERIFIED = "unverified"
+MANIFEST_SIGNATURE_ERROR = "error"
+PATH_DIFFERS_NOTE = (
+    "Current file digest matches proof manifest. Observed path differs; path is metadata, not identity."
+)
 
 
 @dataclass(frozen=True)
@@ -27,7 +32,9 @@ class VerificationResult:
     manifest_signature_status: str
     warnings: list[str]
     reasons: list[str]
+    notes: list[str]
     signature_evidence: dict[str, object]
+    evidence_chain_status: str
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -39,9 +46,12 @@ def manifest_signature_status(proof: Path) -> str:
     public_key_path = signatures_dir / "manifest.pub"
     if not signature_path.exists() or not public_key_path.exists():
         return MANIFEST_SIGNATURE_MISSING_STATUS
-    if verify_signature(public_key_path, signature_path.read_bytes(), proof.read_bytes()):
-        return MANIFEST_SIGNATURE_VALID
-    return MANIFEST_SIGNATURE_INVALID
+    try:
+        if verify_signature(public_key_path, signature_path.read_bytes(), proof.read_bytes()):
+            return MANIFEST_SIGNATURE_VALID
+        return MANIFEST_SIGNATURE_INVALID
+    except OSError:
+        return MANIFEST_SIGNATURE_ERROR
 
 
 def verify_file(source: Path, proof: Path) -> VerificationResult:
@@ -51,8 +61,11 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
     signature_status = manifest_signature_status(proof)
     warnings: list[str] = []
     reasons: list[str] = []
+    notes: list[str] = []
     if signature_status == MANIFEST_SIGNATURE_MISSING_STATUS:
         warnings.append(MANIFEST_SIGNATURE_MISSING)
+    if signature_status == MANIFEST_SIGNATURE_ERROR:
+        warnings.append("manifest_signature_error")
     if signature_status == MANIFEST_SIGNATURE_INVALID:
         reasons.append("Manifest signature validation failed")
         return VerificationResult(
@@ -64,12 +77,23 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             manifest_signature_status=signature_status,
             warnings=warnings,
             reasons=reasons,
+            notes=notes,
             signature_evidence={
                 "manifest_signature": signature_status,
                 "signature_path": str(proof.parent / "signatures" / "manifest.sig"),
                 "public_key_path": str(proof.parent / "signatures" / "manifest.pub"),
             },
+            evidence_chain_status="unverified",
         )
+    chain_path = proof.parent / "evidence_chain.jsonl"
+    if chain_path.exists():
+        chain_ok, chain_errors = verify_evidence_chain(chain_path)
+        evidence_chain_status = "valid" if chain_ok else "invalid"
+        if chain_errors:
+            warnings.extend(chain_errors)
+    else:
+        evidence_chain_status = "missing"
+        warnings.append("evidence_chain_missing")
     if not isinstance(manifest_file, dict) or not manifest_file.get("sha256"):
         return VerificationResult(
             verdict=UNPROVEN,
@@ -80,17 +104,21 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             manifest_signature_status=signature_status,
             warnings=warnings,
             reasons=["Missing sealed SHA-256 digest evidence."],
+            notes=notes,
             signature_evidence={"manifest_signature": signature_status},
+            evidence_chain_status=evidence_chain_status,
         )
 
     identity = inspect_file(source)
     manifest_sha256 = str(manifest_file["sha256"])
     verdict = VERIFIED_INTEGRITY if identity.sha256 == manifest_sha256 else ALTERED_AFTER_PROOF
-    summary = (
-        "The current file digest matches the sealed digest."
-        if verdict == VERIFIED_INTEGRITY
-        else "The current file digest differs from the sealed digest."
-    )
+    if verdict == VERIFIED_INTEGRITY:
+        summary = "The current file digest matches the sealed digest."
+        observed_path = manifest_file.get("path_observed")
+        if isinstance(observed_path, str) and observed_path != str(source):
+            notes.append(PATH_DIFFERS_NOTE)
+    else:
+        summary = "The current file digest differs from the sealed digest."
     return VerificationResult(
         verdict=verdict,
         file_sha256=identity.sha256,
@@ -100,11 +128,13 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
         manifest_signature_status=signature_status,
         warnings=warnings,
         reasons=[],
+        notes=notes,
         signature_evidence={
             "manifest_signature": signature_status,
             "signature_path": str(proof.parent / "signatures" / "manifest.sig"),
             "public_key_path": str(proof.parent / "signatures" / "manifest.pub"),
         },
+        evidence_chain_status=evidence_chain_status,
     )
 
 
@@ -126,8 +156,10 @@ def write_markdown(path: Path, result: VerificationResult) -> None:
             f"Current SHA-256: `{result.file_sha256 or 'unknown'}`",
             f"Manifest SHA-256: `{result.manifest_sha256 or 'unknown'}`",
             f"Manifest signature status: `{result.manifest_signature_status}`",
+            f"Evidence chain status: `{result.evidence_chain_status}`",
             "",
             result.summary,
+            *result.notes,
             "",
         ]
     )

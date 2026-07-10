@@ -9,11 +9,21 @@ from pathlib import Path
 import tohupono
 from tohupono.core.canonical_json import canonical_json_text
 from tohupono.core.file_identity import Blake3UnavailableError, hash_file
-from tohupono.core.proof import create_proof_packet, load_manifest
+from tohupono.core.file_identity import inspect_file
+from tohupono.core.proof import (
+    GENESIS_EVENT_HASH,
+    build_evidence_event,
+    create_proof_packet,
+    event_hash,
+    load_manifest,
+    make_proof_id,
+    verify_evidence_chain,
+)
 from tohupono.reporting.pro_report import COMMUNITY_TEXT, FORBIDDEN_LANGUAGE, generate_report
 from tohupono.trust.keys import export_public_key, verify_signature
 from tohupono.verdicts.classifier import (
     ALTERED_AFTER_PROOF,
+    PATH_DIFFERS_NOTE,
     PROVENANCE_CONFLICT,
     UNPROVEN,
     VERIFIED_INTEGRITY,
@@ -79,6 +89,17 @@ def test_proof_packet_creation_without_payload(tmp_path: Path) -> None:
         assert (out / name).exists()
     assert (out / "signatures" / "manifest.sig").exists()
     assert (out / "signatures" / "manifest.pub").exists()
+    chain_event = json.loads((out / "evidence_chain.jsonl").read_text(encoding="utf-8"))
+    for key in [
+        "event_id",
+        "event_type",
+        "timestamp",
+        "actor",
+        "file_sha256",
+        "previous_event_hash",
+        "event_hash",
+    ]:
+        assert key in chain_event
     assert not (out / "payload").exists()
 
 
@@ -98,6 +119,7 @@ def test_verify_original_and_modified(tmp_path: Path) -> None:
     result = verify_file(sample, out / "manifest.json")
     assert result.verdict == VERIFIED_INTEGRITY
     assert result.manifest_signature_status == "valid"
+    assert result.evidence_chain_status == "valid"
     sample.write_bytes(b"%PDF-1.7\nchanged")
     changed = verify_file(sample, out / "manifest.json")
     assert changed.verdict == ALTERED_AFTER_PROOF
@@ -186,6 +208,118 @@ def test_missing_manifest_signature_warns_without_false_classification(tmp_path:
     assert "manifest_signature_missing" in result.warnings
 
 
+def test_proof_id_is_deterministic_for_canonical_seed(tmp_path: Path) -> None:
+    sample = tmp_path / "sample.txt"
+    sample.write_text("same bytes\n", encoding="utf-8")
+    identity = inspect_file(sample)
+    sealed_at = "2026-07-10T00:00:00Z"
+    assert make_proof_id(identity, sealed_at) == make_proof_id(identity, sealed_at)
+
+
+def test_changed_digest_changes_proof_id(tmp_path: Path) -> None:
+    one = tmp_path / "one.txt"
+    two = tmp_path / "two.txt"
+    one.write_text("one\n", encoding="utf-8")
+    two.write_text("two\n", encoding="utf-8")
+    sealed_at = "2026-07-10T00:00:00Z"
+    assert make_proof_id(inspect_file(one), sealed_at) != make_proof_id(inspect_file(two), sealed_at)
+
+
+def test_event_hash_ignores_event_hash_field() -> None:
+    event = build_evidence_event(
+        event_type="sealed",
+        timestamp="2026-07-10T00:00:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash=GENESIS_EVENT_HASH,
+    )
+    changed = dict(event)
+    changed["event_hash"] = "different"
+    assert event_hash(event) == event_hash(changed)
+
+
+def test_evidence_chain_verification_detects_tampering(tmp_path: Path) -> None:
+    sample = tmp_path / "contract.pdf"
+    sample.write_bytes(b"%PDF-1.7\nsample")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    chain = proof_dir / "evidence_chain.jsonl"
+    ok, errors = verify_evidence_chain(chain)
+    assert ok
+    assert errors == []
+    event = json.loads(chain.read_text(encoding="utf-8"))
+    event["actor"] = "tampered"
+    chain.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    ok, errors = verify_evidence_chain(chain)
+    assert not ok
+    assert "event_1_hash_mismatch" in errors
+
+
+def test_evidence_chain_links_previous_event_hash(tmp_path: Path) -> None:
+    first = build_evidence_event(
+        event_type="sealed",
+        timestamp="2026-07-10T00:00:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash=GENESIS_EVENT_HASH,
+    )
+    second = build_evidence_event(
+        event_type="witnessed",
+        timestamp="2026-07-10T00:01:00Z",
+        actor="tohupono",
+        file_sha256="abc123",
+        previous_event_hash=str(first["event_hash"]),
+    )
+    chain = tmp_path / "evidence_chain.jsonl"
+    chain.write_text(
+        canonical_json_text(first) + "\n" + canonical_json_text(second) + "\n",
+        encoding="utf-8",
+    )
+    assert verify_evidence_chain(chain) == (True, [])
+    second["previous_event_hash"] = "broken"
+    chain.write_text(
+        canonical_json_text(first) + "\n" + canonical_json_text(second) + "\n",
+        encoding="utf-8",
+    )
+    ok, errors = verify_evidence_chain(chain)
+    assert not ok
+    assert "event_2_previous_hash_mismatch" in errors
+
+
+def test_any_file_types_prove_and_verify(tmp_path: Path) -> None:
+    files = [
+        ("text.txt", b"text file\n"),
+        ("binary.bin", bytes([0, 1, 2, 3, 255])),
+        ("extensionless", b"no extension\n"),
+    ]
+    for name, data in files:
+        sample = tmp_path / name
+        sample.write_bytes(data)
+        proof_dir = tmp_path / f"{name}_proof"
+        create_proof_packet(sample, proof_dir)
+        result = verify_file(sample, proof_dir / "manifest.json")
+        assert result.verdict == VERIFIED_INTEGRITY
+
+
+def test_renamed_and_copied_files_verify_by_digest(tmp_path: Path) -> None:
+    original = tmp_path / "original.txt"
+    renamed = tmp_path / "renamed.bin"
+    copied_dir = tmp_path / "copy"
+    copied_dir.mkdir()
+    copied = copied_dir / "copied_without_extension"
+    original.write_bytes(b"same bytes\n")
+    renamed.write_bytes(original.read_bytes())
+    copied.write_bytes(original.read_bytes())
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(original, proof_dir)
+    renamed_result = verify_file(renamed, proof_dir / "manifest.json")
+    copied_result = verify_file(copied, proof_dir / "manifest.json")
+    assert renamed_result.verdict == VERIFIED_INTEGRITY
+    assert PATH_DIFFERS_NOTE in renamed_result.notes
+    assert copied_result.verdict == VERIFIED_INTEGRITY
+    assert PATH_DIFFERS_NOTE in copied_result.notes
+
+
 def test_report_includes_manifest_signature_status(tmp_path: Path) -> None:
     sample = tmp_path / "contract.pdf"
     sample.write_bytes(b"%PDF-1.7\nsample")
@@ -197,6 +331,7 @@ def test_report_includes_manifest_signature_status(tmp_path: Path) -> None:
     text = report.read_bytes().decode("latin-1", errors="ignore")
     assert "Manifest signature status" in text
     assert "valid" in text
+    assert "Evidence chain status" in text
 
 
 def test_cli_end_to_end_default_report_key(tmp_path: Path) -> None:
