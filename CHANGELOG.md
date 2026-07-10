@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added key purpose registry entries for manifest, report, witness, amendment, release, and test purposes.
+- Added `tohupono key inspect` for human and JSON key purpose inspection.
+- Added `tohupono key check` for local key hygiene diagnostics.
+- Documented key management, rotation, and compromise handling.
+- Kept OpenSSL CLI Ed25519 signing and existing default key paths.
+
 ## v0.3.0 - 2026-07-10
 
 - Added a universal byte-first file object model with `file_id` equal to the SHA-256 byte digest.

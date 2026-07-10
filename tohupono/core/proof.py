@@ -11,7 +11,12 @@ from typing import Any, Literal
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
-from tohupono.trust.keys import DEFAULT_MANIFEST_KEY, DEFAULT_MANIFEST_PUBLIC_KEY, sign_manifest_bytes
+from tohupono.trust.keys import (
+    DEFAULT_MANIFEST_KEY,
+    DEFAULT_MANIFEST_PUBLIC_KEY,
+    sign_amendment_bytes,
+    sign_manifest_bytes,
+)
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
 MANIFEST_VERSION = "0.3.0"
@@ -498,7 +503,7 @@ def create_amendment(packet: Path, note: str) -> Path:
     _assert_can_create_packet(out_dir)
     out_dir.mkdir(parents=True)
     write_json(out_dir / "amendment.json", amendment)
-    signature, public_key = sign_manifest_bytes(canonical_json_bytes(amendment))
+    signature, public_key = sign_amendment_bytes(canonical_json_bytes(amendment))
     sig_dir = out_dir / "signatures"
     sig_dir.mkdir()
     (sig_dir / "amendment.sig").write_bytes(signature)

@@ -21,6 +21,8 @@ tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 tohupono inspect-proof proof_packet/manifest.json --json
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
+tohupono key inspect
+tohupono key check --json
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -45,6 +47,15 @@ proof_packet/signatures/manifest.pub
 ```
 
 The manifest signature protects the proof packet before the PDF report layer. The PDF report signature is separate and protects the human-readable report file.
+
+Key purposes are inspectable:
+
+```bash
+python -m tohupono key inspect --purpose manifest
+python -m tohupono key check --json
+```
+
+See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance.
 
 ## v0.3.0 Development Goals
 

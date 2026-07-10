@@ -18,7 +18,7 @@ from tohupono.core.proof import (
     resolve_packet_manifest,
 )
 from tohupono.reporting.pro_report import generate_report
-from tohupono.trust.keys import KeyErrorWithAction
+from tohupono.trust.keys import KeyErrorWithAction, check_keys, inspect_keys, key_purpose_names
 from tohupono.verdicts.classifier import (
     VERIFIED_INTEGRITY,
     manifest_signature_status,
@@ -192,6 +192,40 @@ def _print_compare_human(result: dict[str, object]) -> None:
     print(f"Conclusion: {result['conclusion']}")
 
 
+def _print_key_inspect_human(result: dict[str, object]) -> None:
+    for item in result.get("keys", []):
+        if not isinstance(item, dict):
+            continue
+        print(f"Purpose: {item['purpose']}")
+        print(f"Private key path: {item['private_key_path']}")
+        print(f"Private key exists: {'yes' if item['private_key_exists'] else 'no'}")
+        print(f"Public key path: {item['public_key_path']}")
+        print(f"Public key exists: {'yes' if item['public_key_exists'] else 'no'}")
+        print(f"Allowed operations: {', '.join(item['allowed_operations'])}")
+        print(f"Status: {item['status']}")
+        warnings = item.get("warnings") or []
+        if warnings:
+            print("Warnings:")
+            for warning in warnings:
+                print(f"- {warning}")
+        print("")
+
+
+def _print_key_check_human(result: dict[str, object]) -> None:
+    print(f"OpenSSL available: {'yes' if result.get('openssl_available') else 'no'}")
+    print(f"Status: {result.get('status')}")
+    for item in result.get("keys", []):
+        if not isinstance(item, dict):
+            continue
+        print(f"Purpose: {item['purpose']}")
+        print(f"Status: {item['status']}")
+        for warning in item.get("warnings") or []:
+            print(f"WARN: {warning}")
+        for failure in item.get("failures") or []:
+            print(f"FAIL: {failure}")
+        print("")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tohupono", description="Local-first file-origin proof tooling.")
     parser.add_argument("--version", action="version", version=__version__)
@@ -241,6 +275,15 @@ def build_parser() -> argparse.ArgumentParser:
     audit_cmd = sub.add_parser("audit", help="Produce a technical proof packet audit.")
     audit_cmd.add_argument("packet")
     audit_cmd.add_argument("--json", action="store_true")
+
+    key_cmd = sub.add_parser("key", help="Inspect and check local key purposes.")
+    key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
+    key_inspect_cmd = key_sub.add_parser("inspect", help="Inspect configured key purposes.")
+    key_inspect_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_inspect_cmd.add_argument("--json", action="store_true")
+    key_check_cmd = key_sub.add_parser("check", help="Check local key hygiene.")
+    key_check_cmd.add_argument("--purpose", choices=key_purpose_names())
+    key_check_cmd.add_argument("--json", action="store_true")
 
     report_cmd = sub.add_parser("report", help="Generate a signed PDF report.")
     report_cmd.add_argument("--proof", required=True)
@@ -340,6 +383,22 @@ def run(argv: Sequence[str] | None = None) -> int:
             else:
                 _print_packet_checks(result)
             return EXIT_SUCCESS if result["status"] != "fail" else EXIT_VERIFICATION_FAILED
+        elif args.command == "key":
+            if args.key_command == "inspect":
+                result = inspect_keys(args.purpose)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_inspect_human(result)
+                return EXIT_SUCCESS
+            if args.key_command == "check":
+                result = check_keys(args.purpose)
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_key_check_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown key command")
         elif args.command == "report":
             sig_path = generate_report(
                 proof=Path(args.proof),

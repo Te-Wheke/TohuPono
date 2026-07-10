@@ -50,6 +50,7 @@ def test_cli_help() -> None:
         "compare",
         "amend",
         "audit",
+        "key",
         "report",
     ]:
         assert command in result.stdout

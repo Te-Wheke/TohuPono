@@ -1,5 +1,12 @@
 # Roadmap
 
+## v0.4.0
+
+- key purpose registry;
+- key inspection and hygiene checks;
+- key rotation and compromise documentation;
+- continued separation of manifest, report, amendment, witness, release, and test key purposes.
+
 ## v0.3.0
 
 - universal byte-first file proof model;
