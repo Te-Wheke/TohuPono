@@ -19,6 +19,8 @@ tohupono verify ./file.pdf --proof proof_packet/manifest.json --output verificat
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --json
 tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 tohupono inspect-proof proof_packet/manifest.json --json
+tohupono timestamp inspect proof_packet/
+tohupono timestamp inspect proof_packet/ --json
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -124,6 +126,17 @@ proof_packet/
 Source file content is not copied unless `--include-payload` is explicitly used.
 
 Evidence-chain hashes make recorded events tamper-evident under the local proof packet model. They do not prove external truth, complete custody, or legal admissibility by themselves.
+
+## Timestamping
+
+Proof manifests include a timestamping section. The current implemented adapter records `local_only` timestamp context and never performs network calls.
+
+```bash
+python -m tohupono timestamp inspect proof_packet/
+python -m tohupono timestamp inspect proof_packet/ --json
+```
+
+`local_only` and `missing` timestamp states are reported as `WARN`, not `FAIL`. They do not provide external anchoring. Planned future adapters include OpenTimestamps and RFC 3161.
 
 ## Claim Maturity
 

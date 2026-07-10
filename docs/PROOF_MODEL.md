@@ -15,3 +15,13 @@ Deterministic IDs:
 - `packet_id`: manifest ID plus evidence-chain root.
 
 Proof packets are immutable by default. A correction is represented by an amendment packet, not by editing the sealed packet.
+
+Timestamping:
+
+- proof manifests may include a `timestamping` section;
+- `local_only` records local system time and target digest only;
+- local timestamps are not external anchors;
+- missing or local-only timestamping is a warning, not a verification failure;
+- OpenTimestamps and RFC 3161 are planned adapter types, not implemented network integrations in this slice.
+
+The proof ID seed remains based on stable file and proof fields. Timestamping metadata is recorded for evidence review but must not be overstated as legal finality.

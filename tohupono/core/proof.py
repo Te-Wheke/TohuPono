@@ -11,6 +11,7 @@ from typing import Any, Literal
 from tohupono import __version__
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
+from tohupono.timestamping.model import inspect_manifest_timestamping, local_timestamp_proof
 from tohupono.trust.keys import (
     DEFAULT_MANIFEST_KEY,
     DEFAULT_MANIFEST_PUBLIC_KEY,
@@ -39,6 +40,7 @@ class ProofManifest:
     file: dict[str, object]
     claims: list[dict[str, object]]
     evidence: dict[str, list[dict[str, object]]]
+    timestamping: dict[str, object]
     trust_policy: dict[str, str]
     warnings: list[str]
     community: bool
@@ -212,6 +214,7 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
             "transparency_logs": [],
             "custody_events": [],
         },
+        timestamping={},
         trust_policy={"policy_id": "local_default", "policy_digest": "unconfigured"},
         warnings=warnings,
         community=False,
@@ -233,6 +236,7 @@ def sha256_text(value: bytes) -> str:
 def canonical_manifest_for_id(manifest: dict[str, Any]) -> dict[str, Any]:
     normalized = json.loads(canonical_json_text(manifest))
     normalized.pop("signatures", None)
+    normalized.pop("timestamping", None)
     identifiers = normalized.get("identifiers")
     if isinstance(identifiers, dict):
         identifiers.pop("manifest_id", None)
@@ -294,6 +298,7 @@ def create_proof_packet(
 
     manifest_path = output / "manifest.json"
     manifest_dict = manifest.to_dict()
+    manifest_dict["timestamping"] = local_timestamp_proof(identity.sha256, sealed_at).to_dict()
     sealed_event = build_evidence_event(
         event_type="sealed",
         timestamp=sealed_at,
@@ -451,8 +456,19 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
             key_warnings.append(message)
             warnings.append(f"{purpose}_key_compromise_review")
 
-    checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
-    warnings.append("timestamp_local_only")
+    timestamping = inspect_manifest_timestamping(manifest)
+    timestamp_status = str(timestamping.get("status"))
+    if timestamp_status == "local_only":
+        checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
+        warnings.append("timestamp_local_only")
+    elif timestamp_status == "missing":
+        checks.append({"status": "WARN", "message": "no timestamp proof is present."})
+        warnings.append("timestamp_missing")
+    elif timestamp_status == "anchored":
+        checks.append({"status": "PASS", "message": "timestamp proof is externally anchored."})
+    else:
+        checks.append({"status": "WARN", "message": f"timestamp status is {timestamp_status}."})
+        warnings.append(f"timestamp_{timestamp_status}")
     status = "fail" if failures else ("warn" if warnings else "pass")
     return {
         "checks": checks,
@@ -465,6 +481,8 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,
         "status": status,
+        "timestamping": timestamping,
+        "timestamp_status": timestamp_status,
         "warnings": warnings,
     }
 

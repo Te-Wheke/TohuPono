@@ -15,7 +15,9 @@ The project distinguishes:
 
 `docs/CLAIM_MATURITY.md` defines which claim language is safe at each maturity level and how integrity gaps are classified.
 
-Local timestamps are useful context, but they are not externally anchored in the offline default mode. Missing external timestamp anchoring is reported as `WARN`.
+Local timestamps are useful context, but they are not externally anchored in the offline default mode. `local_only` and `missing` timestamp states are reported as `WARN`, not `FAIL`.
+
+Timestamping can support proof-of-existence once external anchoring exists. A timestamp alone does not prove content truth, authorship, intent, or legal admissibility.
 
 Manifest signatures and report signatures are separate trust layers:
 

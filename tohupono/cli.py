@@ -18,6 +18,7 @@ from tohupono.core.proof import (
     resolve_packet_manifest,
 )
 from tohupono.reporting.pro_report import generate_report
+from tohupono.timestamping.model import inspect_manifest_timestamping
 from tohupono.trust.keys import (
     KeyConflictError,
     KeyErrorWithAction,
@@ -59,7 +60,7 @@ def _emit_error(code: str, message: str, *, json_mode: bool, exit_code: int) -> 
 
 
 def _missing_path_code(command: str, path_arg: str) -> str:
-    if command in {"verify", "verify-file", "report", "inspect-proof", "audit", "amend"} and (
+    if command in {"verify", "verify-file", "report", "inspect-proof", "audit", "amend", "timestamp"} and (
         "manifest" in path_arg.lower() or "packet" in path_arg.lower()
     ):
         return "MISSING_PROOF"
@@ -145,6 +146,30 @@ def _print_packet_checks(result: dict[str, object]) -> None:
     for check in result.get("checks", []):
         if isinstance(check, dict):
             print(f"{check.get('status')}: {check.get('message')}")
+
+
+def _inspect_timestamp(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    result = inspect_manifest_timestamping(manifest)
+    return {
+        "manifest": str(manifest_path),
+        "timestamping": result,
+        "status": result.get("status", "missing"),
+        "warnings": result.get("warnings", []),
+    }
+
+
+def _print_timestamp_human(result: dict[str, object]) -> None:
+    timestamping = result.get("timestamping", {})
+    if not isinstance(timestamping, dict):
+        timestamping = {}
+    print(f"Timestamp status: {result.get('status')}")
+    print(f"Adapter: {timestamping.get('adapter', 'none')}")
+    print(f"Target digest: {timestamping.get('target_digest') or 'unknown'}")
+    print(f"Created at: {timestamping.get('created_at') or 'unknown'}")
+    for warning in result.get("warnings") or []:
+        print(f"WARN: {warning}")
 
 
 def _print_verify_file_human(result: object) -> None:
@@ -310,6 +335,16 @@ def build_parser() -> argparse.ArgumentParser:
     audit_cmd.add_argument("--key-workspace")
     audit_cmd.add_argument("--json", action="store_true")
 
+    timestamp_cmd = sub.add_parser("timestamp", help="Inspect timestamp proof metadata.")
+    timestamp_sub = timestamp_cmd.add_subparsers(dest="timestamp_command", required=True)
+    timestamp_inspect_cmd = timestamp_sub.add_parser(
+        "inspect",
+        description="Inspect packet timestamp proof metadata.",
+        help="Inspect packet timestamp proof metadata.",
+    )
+    timestamp_inspect_cmd.add_argument("packet")
+    timestamp_inspect_cmd.add_argument("--json", action="store_true")
+
     key_cmd = sub.add_parser("key", help="Manage local key purposes and lifecycle metadata.")
     key_sub = key_cmd.add_subparsers(dest="key_command", required=True)
     key_inspect_cmd = key_sub.add_parser("inspect", help="Inspect configured key purposes.")
@@ -435,6 +470,15 @@ def run(argv: Sequence[str] | None = None) -> int:
             else:
                 _print_packet_checks(result)
             return EXIT_SUCCESS if result["status"] != "fail" else EXIT_VERIFICATION_FAILED
+        elif args.command == "timestamp":
+            if args.timestamp_command == "inspect":
+                result = _inspect_timestamp(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_timestamp_human(result)
+                return EXIT_SUCCESS
+            parser.error("Unknown timestamp command")
         elif args.command == "key":
             if args.key_command == "inspect":
                 output_dir = Path(args.output_dir) if args.output_dir else None

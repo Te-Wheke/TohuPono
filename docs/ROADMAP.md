@@ -1,5 +1,14 @@
 # Roadmap
 
+## v0.5.0
+
+- timestamp proof model;
+- timestamp adapter interface;
+- `none` and `local` timestamp adapters;
+- `timestamp inspect` diagnostics;
+- audit warnings for missing and local-only timestamp states;
+- OpenTimestamps and RFC 3161 interfaces before implementations.
+
 ## v0.4.0
 
 - key purpose registry;
@@ -29,7 +38,7 @@ External integrations remain out of the offline default path and should be added
 
 Proof-of-reality is a serious long-term direction, not a current product claim. It should be approached by hardening layered evidence:
 
-- trusted timestamping;
+- trusted timestamping implementations;
 - witness signatures;
 - device and context attestations;
 - external anchoring;
