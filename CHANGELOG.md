@@ -12,6 +12,9 @@
 - Added `verify-chain` human and JSON diagnostics for standalone evidence chains.
 - Added `inspect-proof` human and JSON proof manifest inspection without source-file verification.
 - Strengthened Markdown verification reports with explicit signature, chain, notes, warnings, reasons, and legal-support sections.
+- Added CLI exit-code policy for success, verification failure, input errors, and runtime errors.
+- Added stable JSON error shape for JSON-mode command failures.
+- Added diagnostics workflow and v0.2.0 release-gate documentation.
 - Preserved manifest-key and report-key separation.
 - Preserved local-first/offline operation and legal-support evidence bundle language.
 

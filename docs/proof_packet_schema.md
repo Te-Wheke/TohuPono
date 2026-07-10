@@ -49,3 +49,30 @@ Evidence-chain status values:
 `tohupono verify --json`, `tohupono verify-chain --json`, and `tohupono inspect-proof --json` produce parseable JSON for automation. Human-readable diagnostics are used only when JSON mode is not selected.
 
 Legal-support boundary: This report supports evidence review by recording deterministic file identity, verification results, signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, or legal admissibility.
+
+## CLI Diagnostics
+
+`verify --json` includes verdict, classification, file digest, expected digest, manifest signature status, evidence-chain status, warnings, reasons, and notes.
+
+`verify-chain` checks a standalone `evidence_chain.jsonl` and reports one of `valid`, `missing`, `invalid`, or `error`.
+
+`inspect-proof` reads a manifest and nearby proof packet files without checking a source file. It is useful for packet triage, but source-file verification still requires `verify <file> --proof <manifest.json>`.
+
+JSON-mode command errors use:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "MISSING_FILE",
+    "message": "..."
+  }
+}
+```
+
+CLI exit codes:
+
+- `0`: success
+- `1`: verification failed or proof conflict
+- `2`: user or input error
+- `3`: internal or runtime error

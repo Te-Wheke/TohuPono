@@ -86,6 +86,43 @@ Evidence-chain status values are `valid`, `missing`, `invalid`, and `error`.
 
 Legal-support boundary: This report supports evidence review by recording deterministic file identity, verification results, signatures, and proof-packet status. It does not by itself prove real-world truth, authorship, intent, or legal admissibility.
 
+## CLI Exit Codes
+
+TohuPono commands use a small exit-code policy:
+
+- `0`: success
+- `1`: verification failed or proof conflict
+- `2`: user or input error
+- `3`: internal or runtime error
+
+For example, `verify` returns `0` for `VERIFIED_INTEGRITY`, `1` for `ALTERED_AFTER_PROOF` or `PROVENANCE_CONFLICT`, and `2` for missing input files or missing proof manifests.
+
+JSON-mode command errors use this shape:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "MISSING_FILE",
+    "message": "..."
+  }
+}
+```
+
+Current error codes include `MISSING_FILE`, `MISSING_PROOF`, `INVALID_JSONL`, `INVALID_MANIFEST`, `INVALID_ARGUMENT`, `SIGNATURE_ERROR`, `CHAIN_ERROR`, and `INTERNAL_ERROR`.
+
+## Diagnostics Workflow
+
+```bash
+python -m tohupono prove ./sample.txt --output proof_packet
+python -m tohupono verify ./sample.txt --proof proof_packet/manifest.json --json
+python -m tohupono verify-chain proof_packet/evidence_chain.jsonl --json
+python -m tohupono inspect-proof proof_packet/manifest.json --json
+python -m tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
+```
+
+Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
+
 ## Offline Default
 
 TohuPono performs no network calls in the MVP. External integrations such as OpenTimestamps, RFC3161 TSA, C2PA, BagIt, and Sigstore/Rekor are planned later behind explicit user options.

@@ -63,7 +63,7 @@ def test_hash_stability(tmp_path: Path) -> None:
 
 def test_missing_file() -> None:
     result = run_cli("hash", "missing.txt", "--algorithm", "sha256")
-    assert result.returncode == 1
+    assert result.returncode == 2
     assert "File not found" in result.stderr
 
 
@@ -424,6 +424,69 @@ def test_verify_json_returns_required_keys(tmp_path: Path) -> None:
     assert data["manifest_signature_status"] == "valid"
     assert data["evidence_chain_status"] == "valid"
     assert PATH_DIFFERS_NOTE in data["notes"]
+    assert result.returncode == 0
+
+
+def test_verify_json_missing_file_error_shape(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("source\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    result = run_cli(
+        "verify",
+        str(tmp_path / "missing.txt"),
+        "--proof",
+        str(proof_dir / "manifest.json"),
+        "--json",
+    )
+    assert result.returncode == 2
+    data = json.loads(result.stdout)
+    assert data["status"] == "error"
+    assert data["error"]["code"] == "MISSING_FILE"
+
+
+def test_verify_json_missing_proof_error_shape(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("source\n", encoding="utf-8")
+    result = run_cli("verify", str(sample), "--proof", str(tmp_path / "missing_manifest.json"), "--json")
+    assert result.returncode == 2
+    data = json.loads(result.stdout)
+    assert data["status"] == "error"
+    assert data["error"]["code"] == "MISSING_PROOF"
+
+
+def test_verify_exit_codes_for_altered_and_conflict(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("before\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    sample.write_text("after\n", encoding="utf-8")
+    altered = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--json")
+    assert altered.returncode == 1
+    assert json.loads(altered.stdout)["verdict"] == ALTERED_AFTER_PROOF
+
+    manifest = json.loads((proof_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest["tool"]["version"] = "tampered"
+    (proof_dir / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    conflict = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--json")
+    assert conflict.returncode == 1
+    assert json.loads(conflict.stdout)["verdict"] == PROVENANCE_CONFLICT
+
+
+def test_missing_signature_verify_exit_code_success_for_matching_digest(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("source\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    (proof_dir / "signatures" / "manifest.sig").unlink()
+    result = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--json")
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert data["verdict"] == VERIFIED_INTEGRITY
+    assert data["manifest_signature_status"] == "missing"
 
 
 def test_verify_chain_cli_human_and_json(tmp_path: Path) -> None:
@@ -440,6 +503,22 @@ def test_verify_chain_cli_human_and_json(tmp_path: Path) -> None:
     data = json.loads(machine.stdout)
     assert data["status"] == "valid"
     assert data["event_count"] == 1
+    assert machine.returncode == 0
+
+
+def test_verify_chain_cli_missing_and_malformed_exit_codes(tmp_path: Path) -> None:
+    missing = run_cli("verify-chain", str(tmp_path / "missing.jsonl"), "--json")
+    assert missing.returncode == 2
+    missing_data = json.loads(missing.stdout)
+    assert missing_data["status"] == "missing"
+
+    malformed = tmp_path / "malformed.jsonl"
+    malformed.write_text("{not-json\n", encoding="utf-8")
+    result = run_cli("verify-chain", str(malformed), "--json")
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    assert data["status"] == "invalid"
+    assert "event_1_invalid_json" in data["errors"]
 
 
 def test_verify_chain_cli_reports_broken_previous_hash(tmp_path: Path) -> None:
@@ -461,6 +540,7 @@ def test_verify_chain_cli_reports_broken_previous_hash(tmp_path: Path) -> None:
     chain.write_text(canonical_json_text(first) + "\n" + canonical_json_text(second) + "\n", encoding="utf-8")
     result = run_cli("verify-chain", str(chain), "--json")
     data = json.loads(result.stdout)
+    assert result.returncode == 1
     assert data["status"] == "invalid"
     assert "event_2_previous_hash_mismatch" in data["errors"]
 
@@ -482,6 +562,15 @@ def test_inspect_proof_cli_human_and_json(tmp_path: Path) -> None:
     assert data["manifest_signature_status"] == "valid"
     assert data["evidence_chain_status"] == "valid"
     assert data["boundary"] == "Proof manifest inspected. Source file was not verified in this command."
+    assert machine.returncode == 0
+
+
+def test_inspect_proof_json_missing_manifest_error_shape(tmp_path: Path) -> None:
+    result = run_cli("inspect-proof", str(tmp_path / "missing_manifest.json"), "--json")
+    assert result.returncode == 2
+    data = json.loads(result.stdout)
+    assert data["status"] == "error"
+    assert data["error"]["code"] == "MISSING_PROOF"
 
 
 def test_markdown_report_has_required_sections(tmp_path: Path) -> None:
@@ -520,5 +609,6 @@ def test_modified_source_bytes_still_altered_after_proof_with_valid_signature(tm
     sample.write_text("after\n", encoding="utf-8")
     result = run_cli("verify", str(sample), "--proof", str(proof_dir / "manifest.json"), "--json")
     data = json.loads(result.stdout)
+    assert result.returncode == 1
     assert data["verdict"] == ALTERED_AFTER_PROOF
     assert data["manifest_signature_status"] == "valid"
