@@ -13,6 +13,8 @@ The project distinguishes:
 - legal admissibility;
 - legal proof.
 
+Proof Concepts are not interchangeable. Registry presence does not imply operational support, and support for integrity does not imply support for authenticity, ownership, authorship, truth, or Proof of Reality.
+
 `docs/CLAIM_MATURITY.md` defines which claim language is safe at each maturity level and how integrity gaps are classified.
 
 Local timestamps are useful context, but they are not externally anchored in the offline default mode. `local_only` and `missing` timestamp states are reported as `WARN`, not `FAIL`.

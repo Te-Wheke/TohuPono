@@ -1,6 +1,6 @@
 # TohuPono
 
-TohuPono is a deterministic, local-first file-origin proof system. It records evidence about digital files and produces evidence-based verification outputs for a legal-support evidence bundle.
+TohuPono is a headless, deterministic, local-first proof protocol and proof engine organised around modular Proof Concepts. It records evidence about digital files and produces evidence-based verification outputs for legal-support evidence review.
 
 It verifies technical file identity, digest matches, packet integrity, observed metadata, and report signatures within the local proof model. It does not make unsupported claims about external truth.
 
@@ -30,7 +30,7 @@ tohupono key check --json
 tohupono key create --purpose manifest
 tohupono key rotate --purpose manifest --reason "routine rotation"
 tohupono key compromise --purpose manifest --reason "suspected exposure"
-tohupono audit proof_packet/ --key-workspace keys/
+tohupono audit proof_packet/ --key-directory keys/
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -70,17 +70,31 @@ python -m tohupono key compromise --purpose manifest --reason "suspected exposur
 
 Key creation refuses to overwrite existing key files unless `--force` is supplied. Rotation records local JSONL metadata and creates replacement key material without deleting old keys. Compromise marking records local JSONL metadata and causes inspection/check commands to warn that signatures may need trust-policy review.
 
-A key workspace is the directory containing purpose key files plus `key_rotation_log.jsonl` and `key_compromise_log.jsonl`. The default workspace is `keys/`. Use `--output-dir` with create, rotate, compromise, inspect, and check when operating on another local workspace.
+The key directory contains purpose key files plus key lifecycle metadata. The default key directory is `keys/`. Use `--output-dir` with create, rotate, compromise, inspect, and check when operating on another local key directory.
 
-Packet audit can read lifecycle metadata from a specific key workspace:
+Packet audit can read lifecycle metadata from a specific key directory:
 
 ```bash
-python -m tohupono audit proof_packet/ --key-workspace keys/
+python -m tohupono audit proof_packet/ --key-directory keys/
 ```
 
 Compromise metadata appears as a WARN/review trigger. It does not automatically destroy old proofs or change byte-level verification verdicts.
 
 See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance. Local key logs under `keys/` must not be committed.
+
+## Proof Concepts
+
+Proof Concepts are separate claim models. Registry presence does not imply operational support, and implementation of one concept does not establish another.
+
+Current v0.5.0 development introduces a conservative Proof Concepts registry. Initial maturity assignments use only `unmodelled`, `modelled`, `interface_defined`, `locally_supported`, `externally_supported`, `verified_implementation`, `experimental`, and `deprecated`.
+
+- `integrity`: locally supported through byte digests and packet checks.
+- `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
+- `records`: locally supported for manifests, signatures, evidence chains, amendments, and reports, but not every external record-management requirement.
+- `lineage`: locally supported for recorded relationships only; completeness of history is not proven.
+- `authenticity`: modelled, not established by digest or signature checks alone.
+- `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
+- `reality`: modelled as a long-term layered assessment only.
 
 ## v0.3.0 Development Goals
 

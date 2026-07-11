@@ -1,6 +1,8 @@
 # Proof Model
 
-The core authority is the file digest.
+TohuPono is organised around modular Proof Concepts. Each concept defines its own claim, subject, evidence, verification procedure, trust assumptions, failure conditions, implementation maturity, limitations, privacy implications, and legal boundary.
+
+The core authority for file identity is the file digest.
 
 - `file_id` is the SHA-256 digest of file bytes.
 - Files are read as raw bytes before metadata is considered.
@@ -29,3 +31,15 @@ Timestamping:
 - packet audit uses `evidence_review`, where local-only and unverified receipts are WARN but receipt conflicts are FAIL.
 
 The proof ID seed remains based on stable file and proof fields. Timestamping metadata is recorded for evidence review but must not be overstated as legal finality.
+
+Proof Concept registry metadata is descriptive governance data. It must not alter deterministic proof identifiers.
+
+Initial maturity assignments:
+
+- `integrity`: `locally_supported`;
+- `existence`: `locally_supported`, limited to local timestamp and imported-receipt handling;
+- `records`: `locally_supported`, limited to current packet, signature, chain, amendment and report support;
+- `lineage`: `locally_supported`, limited to recorded relationships;
+- `authenticity`: `modelled`;
+- `ownership`: `modelled`;
+- `reality`: `modelled`.
