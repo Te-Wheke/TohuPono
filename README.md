@@ -23,6 +23,9 @@ tohupono timestamp inspect proof_packet/
 tohupono timestamp inspect proof_packet/ --json
 tohupono timestamp import proof_packet/ ./receipt.bin --type manual
 tohupono timestamp verify proof_packet/ --json
+tohupono concept list
+tohupono concept inspect integrity --json
+tohupono prove ./file.pdf --concept integrity --concept existence --output proof_packet/
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -95,6 +98,26 @@ Current v0.5.0 development introduces a conservative Proof Concepts registry. In
 - `authenticity`: modelled, not established by digest or signature checks alone.
 - `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
 - `reality`: modelled as a long-term layered assessment only.
+
+The first executable Proof Concepts are `integrity` and `existence`.
+
+```bash
+python -m tohupono concept list
+python -m tohupono concept list --json
+python -m tohupono concept inspect integrity
+python -m tohupono concept inspect existence --json
+```
+
+`prove` accepts repeatable `--concept` options. When no concept is supplied, the default executable concept set is `integrity` and `existence`.
+
+```bash
+python -m tohupono prove ./file.bin --concept integrity
+python -m tohupono prove ./file.bin --concept integrity --concept existence
+```
+
+Concept selection is part of the deterministic proof identity. The selected concept IDs are canonicalised before hashing, so command-line ordering does not change identity. Registry prose, display names, maturity wording, roadmap text, and legal commentary are not included in deterministic claim bodies.
+
+Legacy packets without a `proof_concepts` declaration remain verifiable. TohuPono reports explicit declared concepts separately from inferred legacy checks and does not mutate old manifests.
 
 ## v0.3.0 Development Goals
 

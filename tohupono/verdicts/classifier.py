@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tohupono.core.file_identity import inspect_file
 from tohupono.core.proof import evidence_chain_diagnostics, load_manifest, write_json
+from tohupono.concepts.execution import evaluate_declared_concepts
 from tohupono.trust.keys import verify_signature
 
 VERIFIED_INTEGRITY = "VERIFIED_INTEGRITY"
@@ -40,6 +41,9 @@ class VerificationResult:
     notes: list[str]
     signature_evidence: dict[str, object]
     evidence_chain_status: str
+    declared_proof_concepts: list[str]
+    proof_concept_results: list[dict[str, object]]
+    proof_concept_summary: dict[str, object]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -52,10 +56,22 @@ class VerificationResult:
             "file_sha256": self.file_sha256,
             "manifest_signature_status": self.manifest_signature_status,
             "notes": self.notes,
+            "proof_concept_results": self.proof_concept_results,
+            "proof_concept_summary": self.proof_concept_summary,
+            "declared_proof_concepts": self.declared_proof_concepts,
             "reasons": self.reasons,
             "verdict": self.verdict,
             "warnings": self.warnings,
         }
+
+
+def _concept_fields(proof: Path, manifest: dict[str, object], source: Path | None) -> dict[str, object]:
+    diagnostics = evaluate_declared_concepts(proof, manifest, source_path=source)
+    return {
+        "declared_proof_concepts": list(diagnostics.get("declared", [])),
+        "proof_concept_results": list(diagnostics.get("results", [])),
+        "proof_concept_summary": dict(diagnostics.get("summary", {})),
+    }
 
 
 def manifest_signature_status(proof: Path) -> str:
@@ -74,6 +90,7 @@ def manifest_signature_status(proof: Path) -> str:
 
 def verify_file(source: Path, proof: Path) -> VerificationResult:
     manifest = load_manifest(proof)
+    concept_fields = _concept_fields(proof, manifest, source)
     manifest_file = manifest.get("file")
     proof_id = manifest.get("proof_id") if isinstance(manifest.get("proof_id"), str) else None
     signature_status = manifest_signature_status(proof)
@@ -102,6 +119,7 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
                 "public_key_path": str(proof.parent / "signatures" / "manifest.pub"),
             },
             evidence_chain_status="unverified",
+            **concept_fields,
         )
     chain_result = evidence_chain_diagnostics(proof.parent / "evidence_chain.jsonl")
     evidence_chain_status = str(chain_result["status"])
@@ -121,6 +139,7 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             notes=notes,
             signature_evidence={"manifest_signature": signature_status},
             evidence_chain_status=evidence_chain_status,
+            **concept_fields,
         )
     if not isinstance(manifest_file, dict) or not manifest_file.get("sha256"):
         return VerificationResult(
@@ -135,6 +154,7 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             notes=notes,
             signature_evidence={"manifest_signature": signature_status},
             evidence_chain_status=evidence_chain_status,
+            **concept_fields,
         )
 
     identity = inspect_file(source)
@@ -163,6 +183,7 @@ def verify_file(source: Path, proof: Path) -> VerificationResult:
             "public_key_path": str(proof.parent / "signatures" / "manifest.pub"),
         },
         evidence_chain_status=evidence_chain_status,
+        **concept_fields,
     )
 
 

@@ -4,6 +4,12 @@
 
 - Added Proof Concepts governance for distinct proof claim models and maturity boundaries.
 - Added a conservative Proof Concepts registry with deterministic output.
+- Added `tohupono concept list` and `tohupono concept inspect` for deterministic Proof Concept inspection.
+- Added executable Proof Concept handling for `integrity` and `existence` only.
+- Added repeatable `prove --concept` selection with default `integrity` and `existence` concepts.
+- Added manifest `proof_concepts` declarations with stable claim IDs and no mutable registry prose.
+- Added audit, verify-file, and report integration for declared Proof Concept results.
+- Preserved legacy packet verification with a warning when explicit Proof Concept declarations are absent.
 - Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
 - Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
 - Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.

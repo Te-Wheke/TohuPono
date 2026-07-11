@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from tohupono import __version__
+from tohupono.concepts.execution import (
+    build_proof_concepts_declaration,
+    evaluate_declared_concepts,
+    proof_concept_seed,
+    validate_requested_concepts,
+)
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
 from tohupono.timestamping.model import (
@@ -54,6 +60,7 @@ class ProofManifest:
     tool: dict[str, str]
     file: dict[str, object]
     claims: list[dict[str, object]]
+    proof_concepts: dict[str, object]
     evidence: dict[str, list[dict[str, object]]]
     timestamping: dict[str, object]
     trust_policy: dict[str, str]
@@ -69,8 +76,13 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def proof_id_seed(identity: FileIdentity, sealed_at_utc: str) -> dict[str, object]:
-    return {
+def proof_id_seed(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    concepts = validate_requested_concepts(list(concept_ids)) if concept_ids is not None else ()
+    seed = {
         "file_id": identity.sha256,
         "file_sha256": identity.sha256,
         "file_size": identity.size_bytes,
@@ -78,10 +90,17 @@ def proof_id_seed(identity: FileIdentity, sealed_at_utc: str) -> dict[str, objec
         "schema_version": SCHEMA_VERSION,
         "tool_version": __version__,
     }
+    if concepts:
+        seed["proof_concepts"] = proof_concept_seed(concepts)
+    return seed
 
 
-def make_proof_id(identity: FileIdentity, sealed_at_utc: str) -> str:
-    digest = hashlib.sha256(canonical_json_bytes(proof_id_seed(identity, sealed_at_utc))).hexdigest()
+def make_proof_id(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+) -> str:
+    digest = hashlib.sha256(canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids))).hexdigest()
     return f"tp_{digest[:32]}"
 
 
@@ -200,15 +219,21 @@ def evidence_chain_diagnostics(path: Path) -> dict[str, object]:
     }
 
 
-def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
+def build_manifest(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+) -> ProofManifest:
+    selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
     warnings: list[str] = []
     if identity.blake3 is None:
         warnings.append("BLAKE3 unavailable; optional BLAKE3 digest was not recorded.")
+    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts)
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
         manifest_version=MANIFEST_VERSION,
-        proof_id=make_proof_id(identity, sealed_at_utc),
+        proof_id=proof_id,
         sealed_at_utc=sealed_at_utc,
         tool={"name": "tohupono", "version": __version__},
         file=identity.to_dict(),
@@ -221,6 +246,7 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
                 "evidence_refs": [],
             }
         ],
+        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts),
         evidence={
             "hashes": [],
             "timestamps": [],
@@ -235,7 +261,7 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
         community=False,
         identifiers={
             "file_id": identity.sha256,
-            "proof_id": make_proof_id(identity, sealed_at_utc),
+            "proof_id": proof_id,
         },
     )
 
@@ -308,10 +334,12 @@ def create_proof_packet(
     manifest_key: Path = DEFAULT_MANIFEST_KEY,
     manifest_public_key: Path = DEFAULT_MANIFEST_PUBLIC_KEY,
     sealed_at_utc: str | None = None,
+    concept_ids: list[str] | tuple[str, ...] | None = None,
 ) -> ProofManifest:
     identity = inspect_file(source)
     sealed_at = sealed_at_utc or utc_now_iso()
-    manifest = build_manifest(identity, sealed_at)
+    selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
+    manifest = build_manifest(identity, sealed_at, selected_concepts)
     _assert_can_create_packet(output)
     output.mkdir(parents=True, exist_ok=True)
 
@@ -736,16 +764,35 @@ def packet_diagnostics(packet: Path, key_directory: Path | None = None) -> dict[
     )
     failures.extend(str(failure) for failure in timestamp_diagnostics.get("failures", []))
     warnings.extend(str(warning) for warning in timestamp_diagnostics.get("warnings", []))
+    concept_diagnostics = evaluate_declared_concepts(manifest_path, manifest)
+    legacy_warning = concept_diagnostics.get("legacy_warning")
+    if legacy_warning:
+        checks.append({"status": "WARN", "message": str(legacy_warning)})
+        warnings.append("proof_concepts_absent")
+    for result in concept_diagnostics.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        concept_status = str(result.get("status"))
+        concept_id = str(result.get("concept_id"))
+        checks.append({"status": concept_status, "message": f"Proof Concept {concept_id}: {concept_status}."})
+        if concept_status == "FAIL":
+            failures.append(f"proof_concept_{concept_id}_failed")
+        elif concept_status == "WARN":
+            warnings.append(f"proof_concept_{concept_id}_warning")
     status = "fail" if failures else ("warn" if warnings else "pass")
     return {
         "checks": checks,
+        "declared_proof_concepts": concept_diagnostics.get("declared", []),
         "evidence_chain_status": chain["status"],
         "failures": failures,
+        "inferred_legacy_checks": concept_diagnostics.get("inferred_legacy_checks", []),
         "key_lifecycle": key_lifecycle,
         "key_warnings": key_warnings,
         "key_directory": str(key_directory or Path("keys")),
         "manifest_id": identifiers.get("manifest_id"),
         "packet_id": identifiers.get("packet_id"),
+        "proof_concept_results": concept_diagnostics.get("results", []),
+        "proof_concept_summary": concept_diagnostics.get("summary", {}),
         "report_signature_status": report_status,
         "status": status,
         "timestamp_diagnostics": timestamp_diagnostics,

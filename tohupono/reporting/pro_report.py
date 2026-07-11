@@ -9,6 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from tohupono.core.proof import load_manifest
+from tohupono.concepts.execution import evaluate_declared_concepts
 from tohupono.trust.keys import export_public_key, sign_bytes
 from tohupono.verdicts.classifier import manifest_signature_status
 from tohupono.core.proof import verify_evidence_chain
@@ -86,6 +87,49 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         )
     )
     story.append(table)
+    story.append(Spacer(1, 12))
+    concept_diagnostics = evaluate_declared_concepts(proof, manifest)
+    story.append(Paragraph("Proof Concepts", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            "A result for one Proof Concept does not establish another Proof Concept.",
+            styles["Normal"],
+        )
+    )
+    concept_results = concept_diagnostics.get("results") or []
+    if isinstance(concept_results, list) and concept_results:
+        concept_rows = [["Concept", "Status", "Evidence", "Limitations"]]
+        for result in concept_results:
+            if not isinstance(result, dict):
+                continue
+            concept_rows.append(
+                [
+                    _safe(result.get("display_name")),
+                    _safe(result.get("status")),
+                    _safe(result.get("evidence_summary")),
+                    "; ".join(str(item) for item in result.get("limitations", []) if item),
+                ]
+            )
+        concept_table = Table(concept_rows, colWidths=[110, 60, 150, 160])
+        concept_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(concept_table)
+    else:
+        story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
+    story.append(
+        Paragraph(
+            "Integrity matches do not prove authenticity, ownership, authorship, or truth. "
+            "Existence evidence may be local-only, externally verified, missing, or invalid.",
+            styles["Normal"],
+        )
+    )
     story.append(Spacer(1, 12))
     story.append(Paragraph("Missing evidence is classified as UNPROVEN.", styles["Normal"]))
     story.append(Paragraph("Report signature: detached signature over final PDF bytes.", styles["Normal"]))

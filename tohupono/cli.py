@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Sequence
 
 from tohupono import __version__
+from tohupono.concepts.execution import (
+    concept_list_records,
+    inspect_concept_record,
+)
 from tohupono.core.canonical_json import canonical_json_text
 from tohupono.core.file_identity import Blake3UnavailableError, TohuPonoError, hash_file, inspect_file
 from tohupono.core.proof import (
@@ -155,6 +159,55 @@ def _print_packet_checks(result: dict[str, object]) -> None:
     for check in result.get("checks", []):
         if isinstance(check, dict):
             print(f"{check.get('status')}: {check.get('message')}")
+    concept_results = result.get("proof_concept_results") or []
+    if isinstance(concept_results, list):
+        print("Proof Concepts:")
+        if not concept_results:
+            legacy = result.get("inferred_legacy_checks") or []
+            print(f"UNPROVEN: no declared Proof Concepts; inferred legacy checks: {', '.join(legacy) if legacy else 'none'}.")
+        for item in concept_results:
+            if not isinstance(item, dict):
+                continue
+            print(
+                f"{item.get('status')}: {item.get('concept_id')} - "
+                f"{item.get('evidence_summary') or item.get('claim_boundary')}"
+            )
+
+
+def _print_concept_list_human(records: list[dict[str, object]]) -> None:
+    for item in records:
+        print(f"{item['concept_id']}: {item['display_name']}")
+        print(f"  maturity: {item['implementation_maturity']}")
+        print(f"  executable: {'yes' if item['executable'] else 'no'}")
+        print(f"  boundary: {item['claim_boundary']}")
+
+
+def _print_concept_inspect_human(record: dict[str, object]) -> None:
+    print(f"Concept ID: {record['concept_id']}")
+    print(f"Display name: {record['display_name']}")
+    print(f"Maturity: {record['implementation_maturity']}")
+    print(f"Executable: {'yes' if record['executable'] else 'no'}")
+    print(f"Exact claim: {record['exact_claim']}")
+    print(f"Subject: {record['subject']}")
+    print("Required evidence:")
+    for item in record.get("required_evidence", []):
+        print(f"- {item}")
+    print("Verification procedure:")
+    for item in record.get("verification_procedure", []):
+        print(f"- {item}")
+    print("Trust assumptions:")
+    for item in record.get("trust_dependencies", []):
+        print(f"- {item}")
+    print("Failure conditions:")
+    for item in record.get("failure_conditions", []):
+        print(f"- {item}")
+    print("Known limitations:")
+    for item in record.get("known_limitations", []):
+        print(f"- {item}")
+    print("Privacy implications:")
+    for item in record.get("privacy_implications", []):
+        print(f"- {item}")
+    print(f"Legal boundary: {record['legal_boundary']}")
 
 
 def _inspect_timestamp(packet: Path) -> dict[str, object]:
@@ -338,6 +391,15 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("file")
     prove_cmd.add_argument("--output", default="proof_packet")
     prove_cmd.add_argument("--include-payload", action="store_true")
+    prove_cmd.add_argument("--concept", action="append", dest="concepts")
+
+    concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
+    concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
+    concept_list_cmd = concept_sub.add_parser("list", help="List registered Proof Concepts.")
+    concept_list_cmd.add_argument("--json", action="store_true")
+    concept_inspect_cmd = concept_sub.add_parser("inspect", help="Inspect one registered Proof Concept.")
+    concept_inspect_cmd.add_argument("concept_id")
+    concept_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -452,9 +514,30 @@ def run(argv: Sequence[str] | None = None) -> int:
             print(digest)
             return EXIT_SUCCESS
         elif args.command == "prove":
-            manifest = create_proof_packet(Path(args.file), Path(args.output), args.include_payload)
+            manifest = create_proof_packet(
+                Path(args.file),
+                Path(args.output),
+                args.include_payload,
+                concept_ids=args.concepts,
+            )
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
+        elif args.command == "concept":
+            if args.concept_command == "list":
+                records = concept_list_records()
+                if args.json:
+                    _print_json({"concepts": records, "status": "ok"})
+                else:
+                    _print_concept_list_human(records)
+                return EXIT_SUCCESS
+            if args.concept_command == "inspect":
+                record = inspect_concept_record(args.concept_id)
+                if args.json:
+                    _print_json({"concept": record, "status": "ok"})
+                else:
+                    _print_concept_inspect_human(record)
+                return EXIT_SUCCESS
+            parser.error("Unknown concept command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))

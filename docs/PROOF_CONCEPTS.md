@@ -6,6 +6,8 @@ A Proof Concept is a bounded claim model. It defines what is being claimed, what
 
 Registry presence does not imply operational support.
 
+Executable status is controlled by a separate execution registry. In this slice, only `integrity` and `existence` are executable.
+
 ## Maturity Values
 
 - `unmodelled`
@@ -70,3 +72,31 @@ Every new concept entry must define:
 - legal boundary.
 
 Concept metadata is governance data. It must not alter deterministic proof identifiers.
+
+## CLI
+
+```bash
+python -m tohupono concept list
+python -m tohupono concept list --json
+python -m tohupono concept inspect integrity
+python -m tohupono concept inspect existence --json
+```
+
+`concept list` reports concept ID, display name, maturity, executable status, and concise claim boundary. `concept inspect` expands the exact claim, subject, evidence, verification procedure, trust assumptions, failure conditions, limitations, privacy implications, and legal boundary.
+
+## Proof Generation
+
+`prove` accepts repeatable concept selection:
+
+```bash
+python -m tohupono prove ./file.bin --concept integrity
+python -m tohupono prove ./file.bin --concept integrity --concept existence
+```
+
+When no concept is supplied, `prove` requests `integrity` and `existence`. TohuPono does not provide `--all`; a proof operation must not silently claim every registered concept.
+
+The selected concept IDs are canonicalised and stored in the manifest. Changing selected concept IDs changes proof identity. Changing registry descriptions, display names, maturity wording, or legal text does not change proof identity.
+
+## Legacy Packets
+
+Packets created before explicit Proof Concept declarations remain loadable and verifiable. They are reported as legacy packets with inferred diagnostic coverage. TohuPono does not mutate the stored manifest or claim that older packets explicitly requested concepts.

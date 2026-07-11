@@ -34,6 +34,31 @@ The proof ID seed remains based on stable file and proof fields. Timestamping me
 
 Proof Concept registry metadata is descriptive governance data. It must not alter deterministic proof identifiers.
 
+## Executable Proof Concepts
+
+The first executable Proof Concepts are:
+
+- `integrity`;
+- `existence`.
+
+Registered concepts such as `authenticity`, `ownership`, `records`, `lineage`, and `reality` are not made executable merely by appearing in the registry.
+
+New proof manifests include a top-level `proof_concepts` declaration:
+
+```json
+{
+  "schema_version": "tohupono.proof_concepts.v1",
+  "requested": ["existence", "integrity"],
+  "claims": []
+}
+```
+
+Claim records contain stable machine data: `claim_id`, `concept_id`, `subject`, and `parameters`. They do not embed display names, roadmap text, maturity descriptions, legal commentary, or other mutable registry prose.
+
+When no `--concept` option is supplied, `prove` defaults to `integrity` and `existence`. Concept IDs are sorted after validation, so CLI order does not alter proof identity. Changing the selected concept set does alter proof identity.
+
+Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
+
 Initial maturity assignments:
 
 - `integrity`: `locally_supported`;
