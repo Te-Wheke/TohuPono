@@ -5,6 +5,9 @@ from pathlib import Path
 
 from tohupono.concepts.model import MATURITY_VALUES
 from tohupono.concepts.registry import concept_registry, get_concept
+from tohupono.trust.keys import verify_lifecycle_chain
+
+from tests.support import run_cli
 
 def test_agents_operating_contract_mentions_proof_concepts_and_security_rules() -> None:
     text = Path("AGENTS.md").read_text(encoding="utf-8")
@@ -47,3 +50,29 @@ def test_concept_registry_output_is_deterministic() -> None:
     first = json.dumps(concept_registry(), sort_keys=True, separators=(",", ":"))
     second = json.dumps(concept_registry(), sort_keys=True, separators=(",", ":"))
     assert first == second
+def test_lifecycle_chain_tampering_fails(tmp_path: Path) -> None:
+    key_dir = tmp_path / "keys"
+    assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json").returncode == 0
+    assert (
+        run_cli(
+            "key",
+            "rotate",
+            "--purpose",
+            "manifest",
+            "--reason",
+            "chain tamper",
+            "--output-dir",
+            str(key_dir),
+            "--json",
+        ).returncode
+        == 0
+    )
+    log_path = key_dir / "key_lifecycle_log.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    event = json.loads(lines[-1])
+    event["reason"] = "edited"
+    lines[-1] = json.dumps(event, sort_keys=True, separators=(",", ":"))
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = verify_lifecycle_chain(key_dir)
+    assert result["status"] == "invalid"
+    assert any("hash_mismatch" in failure for failure in result["failures"])

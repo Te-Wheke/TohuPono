@@ -16,7 +16,7 @@ Record local compromise metadata:
 ```bash
 python -m tohupono key compromise --purpose manifest --reason "suspected exposure"
 python -m tohupono key compromise --purpose report --reason "lost device review" --json
-python -m tohupono key compromise --purpose manifest --reason "workspace marker" --output-dir /path/to/key-workspace --json
+python -m tohupono key compromise --purpose manifest --reason "key directory marker" --output-dir /path/to/key-directory --json
 ```
 
 The command does not delete keys and does not modify old proof packets. It appends a JSONL record to:
@@ -41,21 +41,21 @@ When compromise metadata exists for a purpose, `key inspect` and `key check` war
 WARN: compromise metadata exists for this key purpose. Existing signatures may require review under the applicable trust policy.
 ```
 
-Use the same key workspace for inspection/checking that was used when recording compromise metadata:
+Use the same key directory for inspection/checking that was used when recording compromise metadata:
 
 ```bash
-python -m tohupono key inspect --purpose manifest --output-dir /path/to/key-workspace
-python -m tohupono key check --purpose manifest --output-dir /path/to/key-workspace --json
+python -m tohupono key inspect --purpose manifest --output-dir /path/to/key-directory
+python -m tohupono key check --purpose manifest --output-dir /path/to/key-directory --json
 ```
 
 Key compromise should be treated as at least `WARN` for affected evidence strength. It may become `FAIL` for workflows that require a trustworthy signature from that purpose.
 
 Compromise is a trust-policy review trigger, not automatic proof destruction. Do not delete old proof packets to hide compromise. Preserve them and add clear context. Future trust policies may choose stricter enforcement for specific workflows.
 
-Packet audit can read compromise metadata from a selected workspace:
+Packet audit can read compromise metadata from a selected key directory:
 
 ```bash
-python -m tohupono audit proof_packet/ --key-workspace /path/to/key-workspace
+python -m tohupono audit proof_packet/ --key-directory /path/to/key-directory
 ```
 
 When metadata is visible, audit reports:
@@ -63,3 +63,7 @@ When metadata is visible, audit reports:
 ```text
 WARN: compromise metadata exists for the manifest key purpose. Existing signatures may require review under the applicable trust policy.
 ```
+
+Compromise events are recorded in local lifecycle metadata. Existing legacy `key_compromise_log.jsonl` records remain inspectable as unlinked evidence, while new canonical lifecycle events are chained in `key_lifecycle_log.jsonl`.
+
+Lifecycle logs are tamper-evident under the local key lifecycle model. They are not immutable. Internal chain gaps and removal of events referenced by later retained events are detectable. Removal of the unreferenced tail of a purely local lifecycle log may not be detectable without a separately retained, signed or externally anchored head checkpoint.
