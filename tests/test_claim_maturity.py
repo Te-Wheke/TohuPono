@@ -118,7 +118,6 @@ def test_v040_release_checklist_exists_and_covers_key_gates() -> None:
         "python -m compileall tohupono tests",
         "python -m tohupono key inspect --json",
         "python -m tohupono key check --json",
-        "audit --key-workspace",
         "no keys or key lifecycle logs are tracked",
         "Bump version to `0.4.0` only during the release gate",
         "annotated tag `v0.4.0`",

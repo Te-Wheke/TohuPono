@@ -623,7 +623,7 @@ def timestamp_verification_diagnostics(
     }
 
 
-def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
+def packet_diagnostics(packet: Path, key_directory: Path | None = None) -> dict[str, Any]:
     manifest_path = resolve_packet_manifest(packet)
     proof_dir = manifest_path.parent
     checks: list[dict[str, str]] = []
@@ -712,7 +712,7 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
     key_lifecycle: dict[str, object] = {}
     key_warnings: list[str] = []
     for purpose in ["manifest", "report", "amendment"]:
-        lifecycle = key_lifecycle_summary(purpose, key_workspace)
+        lifecycle = key_lifecycle_summary(purpose, key_directory)
         key_lifecycle[purpose] = {
             "compromise_events": lifecycle.get("compromise_events", 0),
             "latest_compromise_event_id": lifecycle.get("latest_compromise_event_id"),
@@ -743,7 +743,7 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
         "failures": failures,
         "key_lifecycle": key_lifecycle,
         "key_warnings": key_warnings,
-        "key_workspace": str(key_workspace or Path("keys")),
+        "key_directory": str(key_directory or Path("keys")),
         "manifest_id": identifiers.get("manifest_id"),
         "packet_id": identifiers.get("packet_id"),
         "report_signature_status": report_status,

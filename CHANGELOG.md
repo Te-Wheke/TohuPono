@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added Proof Concepts governance for distinct proof claim models and maturity boundaries.
+- Added a conservative Proof Concepts registry with deterministic output.
+- Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
+- Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
+- Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.
+- Changed `key rotate` to promote a new active key generation while retaining the previous generation for historical verification.
+- Added rollback behaviour for key replacement or rotation when lifecycle event persistence fails after key promotion.
+- Added canonical key lifecycle events with local tamper-evident hash chaining while preserving legacy rotation and compromise log readability.
+- Documented lifecycle truncation limits: unreferenced tail removal may not be detectable without a retained, signed, or externally anchored head checkpoint.
+- Added timestamp provider registry placeholders for OpenTimestamps and RFC 3161 without network calls.
+- Added project-authored no-macron validation.
 - Added timestamp proof model and adapter interface.
 - Added `none` and `local` timestamp adapters without network calls.
 - Added manifest `timestamping` metadata with `local_only` status for locally created proof packets.
@@ -24,12 +35,12 @@
 - Added `tohupono key rotate` with JSONL rotation metadata and no old-key deletion.
 - Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
 - Added key lifecycle JSON output for rotation and compromise summaries.
-- Added `--output-dir` support to `key inspect` and `key check` for workspace-aware key diagnostics.
+- Added `--output-dir` support to `key inspect` and `key check` for key-directory diagnostics.
 - Added rotation metadata and compromise metadata records for local key lifecycle review.
 - Kept compromise warnings as `WARN`, not `FAIL`, so trust-policy review does not automatically destroy old proofs.
 - Added packet audit WARN output for local compromised-key metadata where visible.
-- Added `audit --key-workspace` to read key lifecycle metadata from an explicit workspace.
-- Added audit JSON key lifecycle fields for selected key workspaces.
+- Added `audit --key-directory` to read key lifecycle metadata from an explicit key directory.
+- Added audit JSON key lifecycle fields for selected key directories.
 - Added a v0.4.0 release checklist for key-management hardening gates.
 - Documented key management, key rotation, and key compromise handling.
 - Kept OpenSSL CLI Ed25519 signing and existing default key paths.

@@ -17,6 +17,7 @@ from tohupono.trust.keys import verify_lifecycle_chain
 
 from tests.support import run_cli
 
+
 def test_agents_operating_contract_mentions_proof_concepts_and_security_rules() -> None:
     text = Path("AGENTS.md").read_text(encoding="utf-8")
     assert "Proof Concepts" in text
@@ -161,3 +162,28 @@ def test_lifecycle_chain_tampering_fails(tmp_path: Path) -> None:
     result = verify_lifecycle_chain(key_dir)
     assert result["status"] == "invalid"
     assert any("hash_mismatch" in failure for failure in result["failures"])
+
+
+def test_no_macron_scan_passes_project_text() -> None:
+    result = subprocess.run(
+        ["python", "scripts/check_no_macrons.py"],
+        cwd=Path.cwd(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+
+
+def test_no_hidden_runtime_storage_architecture_terms_in_new_docs() -> None:
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            Path("AGENTS.md"),
+            Path("docs/PROOF_CONCEPTS.md"),
+            Path("docs/SECURITY_ARCHITECTURE.md"),
+        ]
+    )
+    assert ("WH" + "KPP") not in combined
+    assert ("." + "whkpp") not in combined
+    assert "runtime storage resolver" not in combined.lower()

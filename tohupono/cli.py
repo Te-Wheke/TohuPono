@@ -323,7 +323,7 @@ def _print_key_lifecycle_human(result: dict[str, object], action: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="tohupono", description="Local-first file-origin proof tooling.")
+    parser = argparse.ArgumentParser(prog="tohupono", description="Local-first proof protocol tooling.")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -370,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_cmd = sub.add_parser("audit", help="Produce a technical proof packet audit.")
     audit_cmd.add_argument("packet")
-    audit_cmd.add_argument("--key-workspace")
+    audit_cmd.add_argument("--key-directory", dest="key_directory")
     audit_cmd.add_argument("--json", action="store_true")
 
     timestamp_cmd = sub.add_parser("timestamp", help="Inspect and import timestamp proof metadata.")
@@ -518,8 +518,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print("PASS: original packet was not modified.")
             return EXIT_SUCCESS
         elif args.command == "audit":
-            key_workspace = Path(args.key_workspace) if args.key_workspace else None
-            result = packet_diagnostics(Path(args.packet), key_workspace=key_workspace)
+            key_directory = Path(args.key_directory) if args.key_directory else None
+            result = packet_diagnostics(Path(args.packet), key_directory=key_directory)
             if args.json:
                 _print_json(result)
             else:
