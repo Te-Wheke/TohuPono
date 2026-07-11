@@ -25,6 +25,8 @@ from tohupono.timestamping.model import (
     local_timestamp_proof,
     make_receipt_id,
 )
+from tohupono.security.limits import MAX_RECEIPT_BYTES, MAX_RECEIPT_METADATA_BYTES
+from tohupono.security.paths import safe_child_path
 from tohupono.trust.keys import (
     DEFAULT_MANIFEST_KEY,
     DEFAULT_MANIFEST_PUBLIC_KEY,
@@ -365,6 +367,8 @@ def create_proof_packet(
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
+    if path.exists() and path.stat().st_size > MAX_RECEIPT_METADATA_BYTES * 4:
+        raise ValueError("Structured proof input exceeds configured size limit.")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -383,8 +387,10 @@ def list_timestamp_receipts(packet: Path) -> list[dict[str, object]]:
     receipts: list[dict[str, object]] = []
     for receipt_path in sorted(receipts_dir.glob("receipt_*.json")):
         try:
+            if receipt_path.stat().st_size > MAX_RECEIPT_METADATA_BYTES:
+                raise ValueError("timestamp receipt metadata exceeds configured size limit")
             receipt = load_manifest(receipt_path)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError, json.JSONDecodeError):
             receipts.append(
                 {
                     "receipt_id": receipt_path.stem.removeprefix("receipt_"),
@@ -399,6 +405,37 @@ def list_timestamp_receipts(packet: Path) -> list[dict[str, object]]:
     return receipts
 
 
+def _resolve_stored_receipt_path(proof_dir: Path, receipt_path_value: object) -> Path:
+    if not isinstance(receipt_path_value, str) or not receipt_path_value:
+        raise ValueError("timestamp receipt path is empty")
+    raw = Path(receipt_path_value)
+    if raw.is_absolute():
+        raise ValueError("timestamp receipt path must be relative")
+    if any(part in {"", ".."} for part in raw.parts):
+        raise ValueError("timestamp receipt path contains traversal")
+
+    receipts_root = proof_dir / "timestamp_receipts"
+    if receipts_root.exists() and receipts_root.is_symlink():
+        raise ValueError("timestamp receipt directory must not be a symlink")
+
+    raw_parts = raw.parts
+    if raw_parts and raw_parts[0] == "timestamp_receipts":
+        raw = Path(*raw_parts[1:]) if len(raw_parts) > 1 else Path("")
+    if not raw.parts:
+        raise ValueError("timestamp receipt path is empty")
+
+    receipts_root_resolved = receipts_root.resolve(strict=False)
+    receipt_path = safe_child_path(receipts_root, raw)
+    current = receipts_root
+    for part in receipt_path.relative_to(receipts_root_resolved).parts[:-1]:
+        current = current / part
+        if current.exists() and current.is_symlink():
+            raise ValueError("timestamp receipt path contains a symlinked parent")
+    if receipt_path.exists() and receipt_path.is_symlink():
+        raise ValueError("timestamp receipt file must not be a symlink")
+    return receipt_path
+
+
 def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str = "manual") -> dict[str, object]:
     if receipt_type not in TIMESTAMP_RECEIPT_TYPES:
         raise ValueError(f"Unsupported timestamp receipt type: {receipt_type}")
@@ -409,6 +446,8 @@ def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str
         raise ValueError("Proof manifest does not contain a target file digest.")
     if not receipt_file.exists() or not receipt_file.is_file():
         raise FileNotFoundError(str(receipt_file))
+    if receipt_file.stat().st_size > MAX_RECEIPT_BYTES:
+        raise ValueError("Timestamp receipt exceeds configured size limit.")
 
     target_digest = str(file_info["sha256"])
     receipt_sha256 = _file_sha256(receipt_file)
@@ -536,11 +575,18 @@ def timestamp_verification_diagnostics(
                     "message": "timestamp receipt target digest does not match packet manifest digest.",
                 }
             )
-        receipt_path_value = receipt.get("receipt_path")
-        receipt_path = proof_dir / str(receipt_path_value)
-        if not receipt_path.exists() or not receipt_path.is_file():
+        try:
+            receipt_path = _resolve_stored_receipt_path(proof_dir, receipt.get("receipt_path"))
+        except ValueError:
+            failures.append(f"{receipt_id}_stored_file_path_invalid")
+            checks.append({"status": "FAIL", "message": "timestamp receipt path is invalid or escapes packet storage."})
+            continue
+        if not receipt_path.exists():
             failures.append(f"{receipt_id}_stored_file_missing")
             checks.append({"status": "FAIL", "message": "timestamp receipt file is missing from packet storage."})
+        elif not receipt_path.is_file():
+            failures.append(f"{receipt_id}_stored_file_not_regular")
+            checks.append({"status": "FAIL", "message": "timestamp receipt file is not a regular file."})
         else:
             actual_sha256 = _file_sha256(receipt_path)
             if str(receipt.get("receipt_sha256")) != actual_sha256:

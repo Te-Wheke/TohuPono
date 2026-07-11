@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tohupono.core.proof import create_proof_packet, load_manifest, make_manifest_id
 from tohupono.timestamping.adapters import LocalTimestampAdapter, NoneTimestampAdapter
 from tohupono.timestamping.model import (
@@ -21,9 +23,13 @@ def test_timestamp_status_vocabulary() -> None:
         "missing",
         "local_only",
         "pending",
+        "receipt_present",
         "anchored",
+        "unverified",
+        "provider_unavailable",
         "invalid",
         "unsupported",
+        "deferred",
         "error",
     )
 
@@ -415,6 +421,101 @@ def test_receipt_missing_stored_file_is_fail(tmp_path: Path) -> None:
     result = run_cli("timestamp", "verify", str(proof_dir), "--json")
     assert result.returncode == 1
     assert any("stored_file_missing" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def _receipt_path_failure(tmp_path: Path, receipt_path_value: object, expected_failure: str) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("receipt path failure\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["receipt_path"] = receipt_path_value
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any(expected_failure in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_absolute_path_is_fail(tmp_path: Path) -> None:
+    _receipt_path_failure(tmp_path, str(tmp_path / "outside.bin"), "stored_file_path_invalid")
+
+
+def test_receipt_parent_traversal_is_fail(tmp_path: Path) -> None:
+    _receipt_path_failure(tmp_path, "../outside.bin", "stored_file_path_invalid")
+
+
+def test_receipt_nested_traversal_is_fail(tmp_path: Path) -> None:
+    _receipt_path_failure(tmp_path, "timestamp_receipts/nested/../../outside.bin", "stored_file_path_invalid")
+
+
+def test_receipt_symlink_file_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("symlink receipt\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    stored = proof_dir / str(record["receipt_path"])
+    target = tmp_path / "outside.bin"
+    target.write_text("outside\n", encoding="utf-8")
+    stored.unlink()
+    try:
+        stored.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("stored_file_path_invalid" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_symlinked_receipt_directory_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("symlink receipt dir\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    receipts = proof_dir / "timestamp_receipts"
+    receipts.mkdir()
+    outside = tmp_path / "outside_receipts"
+    outside.mkdir()
+    receipts.rmdir()
+    try:
+        receipts.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    record = {
+        "adapter_type": "manual",
+        "imported_at": "2026-01-01T00:00:00Z",
+        "receipt_id": "tr_symlink_dir",
+        "receipt_path": "timestamp_receipts/receipt.bin",
+        "receipt_sha256": "0" * 64,
+        "receipt_size": 1,
+        "receipt_status": "unverified",
+        "receipt_type": "manual",
+        "target_digest": load_manifest(proof_dir / "manifest.json")["file"]["sha256"],
+    }
+    (outside / "receipt_symlink_dir.json").write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("stored_file_path_invalid" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_directory_instead_of_regular_file_is_fail(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("receipt directory\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    stored = proof_dir / str(record["receipt_path"])
+    stored.unlink()
+    stored.mkdir()
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    assert any("stored_file_not_regular" in failure for failure in json.loads(result.stdout)["failures"])
 
 
 def test_receipt_sha256_mismatch_is_fail(tmp_path: Path) -> None:

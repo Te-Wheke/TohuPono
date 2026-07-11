@@ -2,11 +2,24 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict, dataclass
+from enum import Enum
 from typing import Any, Literal
 
 from tohupono.core.canonical_json import canonical_json_bytes
 
-TimestampStatus = Literal["missing", "local_only", "pending", "anchored", "invalid", "unsupported", "error"]
+TimestampStatus = Literal[
+    "missing",
+    "local_only",
+    "pending",
+    "receipt_present",
+    "anchored",
+    "unverified",
+    "provider_unavailable",
+    "invalid",
+    "unsupported",
+    "deferred",
+    "error",
+]
 TimestampAdapterType = Literal["none", "local", "opentimestamps", "rfc3161", "manual"]
 TimestampReceiptType = Literal["manual", "opentimestamps", "rfc3161", "unknown"]
 TimestampReceiptStatus = Literal["imported", "unverified", "verified", "invalid", "unsupported", "missing"]
@@ -16,9 +29,13 @@ TIMESTAMP_STATUSES: tuple[TimestampStatus, ...] = (
     "missing",
     "local_only",
     "pending",
+    "receipt_present",
     "anchored",
+    "unverified",
+    "provider_unavailable",
     "invalid",
     "unsupported",
+    "deferred",
     "error",
 )
 TIMESTAMP_ADAPTER_TYPES: tuple[TimestampAdapterType, ...] = (
@@ -51,6 +68,17 @@ DEFAULT_TIMESTAMP_POLICY: TimestampPolicy = "evidence_review"
 LOCAL_TIMESTAMP_WARNING = "Local timestamp is not externally anchored."
 MISSING_TIMESTAMP_WARNING = "No timestamp proof is present."
 UNVERIFIED_RECEIPT_WARNING = "Imported timestamp receipt is recorded but not externally verified by TohuPono."
+
+
+class TimestampStatusName(str, Enum):
+    NO_TIMESTAMP = "missing"
+    TIMESTAMP_REQUESTED = "pending"
+    TIMESTAMP_RECEIPT_PRESENT = "receipt_present"
+    TIMESTAMP_VERIFIED = "anchored"
+    TIMESTAMP_UNVERIFIED = "unverified"
+    TIMESTAMP_PROVIDER_UNAVAILABLE = "provider_unavailable"
+    TIMESTAMP_RECEIPT_INVALID = "invalid"
+    TIMESTAMP_VERIFICATION_DEFERRED = "deferred"
 
 
 class TimestampReceiptConflictError(Exception):

@@ -22,6 +22,8 @@ Adapter types:
 
 This slice implements only `none` and `local` adapters. It does not call OpenTimestamps, RFC 3161 timestamp authorities, blockchains, transparency logs, C2PA services, Sigstore, Rekor, W3C VC systems, or any network service.
 
+The v0.5.0 provider registry includes offline placeholders for `opentimestamps` and `rfc3161`. They return structured unavailable or deferred results and perform no network calls or external commands.
+
 `local_only` means the proof packet records local system time and the target digest. It supports review of local proof creation context, but it is not trusted external anchoring and must remain a `WARN` in audit output.
 
 Missing or local-only timestamping is not a verification failure by itself. It weakens timestamp evidence strength and should be disclosed as a warning.

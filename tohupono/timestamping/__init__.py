@@ -13,11 +13,14 @@ from tohupono.timestamping.model import (
     TimestampReceiptConflictError,
     TimestampProof,
     TimestampVerificationResult,
+    TimestampStatusName,
     inspect_manifest_timestamping,
     local_timestamp_proof,
     make_receipt_id,
     missing_timestamp_proof,
 )
+from tohupono.timestamping.provider import TimestampProvider, TimestampRequest
+from tohupono.timestamping.registry import TimestampProviderRegistry, timestamp_provider_registry
 
 __all__ = [
     "LOCAL_TIMESTAMP_WARNING",
@@ -34,8 +37,13 @@ __all__ = [
     "TimestampReceipt",
     "TimestampReceiptConflictError",
     "TimestampVerificationResult",
+    "TimestampStatusName",
+    "TimestampProvider",
+    "TimestampProviderRegistry",
+    "TimestampRequest",
     "inspect_manifest_timestamping",
     "local_timestamp_proof",
     "make_receipt_id",
     "missing_timestamp_proof",
+    "timestamp_provider_registry",
 ]
