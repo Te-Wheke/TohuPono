@@ -15,16 +15,19 @@ The project distinguishes:
 
 Proof Concepts are not interchangeable. Registry presence does not imply operational support, and support for integrity does not imply support for authenticity, ownership, authorship, truth, or Proof of Reality.
 
-Executable concept support is currently limited to `integrity` and `existence`.
+Executable concept support is currently limited to `integrity`, `existence`, and `records`.
 
 - `integrity` checks whether supplied bytes match the recorded digest.
 - `existence` reviews available timestamp evidence for the recorded digest.
+- `records` verifies canonical record envelopes and their link to the packet subject digest.
 
 `integrity` does not prove authenticity, authorship, ownership, legal identity, original creation, truth, or absence of earlier manipulation.
 
 `existence` does not prove content truth. Local timestamps are local evidence only, not authoritative time, external witnessing, immutability, legal proof, or independent anchoring.
 
 Other registered concepts remain non-executable until a future implementation defines the required evidence and verification procedure.
+
+`records` does not prove declared metadata truth, external registration, authority, ownership, identity, authorship, authenticity, legal validity, legal admissibility, completeness of history, or accuracy of an external reference. Record attributes are user-declared manifest data and may be sensitive; do not place secrets, private keys, credentials, or unnecessary private metadata in record attributes.
 
 `docs/CLAIM_MATURITY.md` defines which claim language is safe at each maturity level and how integrity gaps are classified.
 

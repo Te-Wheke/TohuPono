@@ -121,12 +121,50 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
             )
         )
         story.append(concept_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "records":
+                continue
+            records = result.get("records") if isinstance(result.get("records"), list) else []
+            rows = [["Record ID", "Type", "Namespace", "Reference", "Attributes"]]
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                rows.append(
+                    [
+                        _safe(record.get("record_id")),
+                        _safe(record.get("record_type")),
+                        _safe(record.get("namespace")),
+                        _safe(record.get("reference") if record.get("reference") is not None else "none"),
+                        _safe(record.get("attribute_count")),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Records Details", styles["Heading3"]))
+                record_table = Table(rows, colWidths=[150, 70, 80, 120, 60])
+                record_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(record_table)
     else:
         story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
     story.append(
         Paragraph(
             "Integrity matches do not prove authenticity, ownership, authorship, or truth. "
             "Existence evidence may be local-only, externally verified, missing, or invalid.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Records verifies the packet's canonical record envelope and its link to the recorded subject. "
+            "It does not independently establish that declared record metadata is true, authoritative, complete, or legally valid.",
             styles["Normal"],
         )
     )

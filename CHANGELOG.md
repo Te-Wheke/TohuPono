@@ -10,6 +10,10 @@
 - Added manifest `proof_concepts` declarations with stable claim IDs and no mutable registry prose.
 - Added audit, verify-file, and report integration for declared Proof Concept results.
 - Preserved legacy packet verification with a warning when explicit Proof Concept declarations are absent.
+- Added executable Proof of Records support through strict JSON record descriptors, canonical record envelopes, deterministic `rec_...` record IDs, and records claim linkage.
+- Added repeatable `prove --record-json` for explicit `--concept records` proofs.
+- Added `tohupono record validate` and `tohupono record inspect` for descriptor validation and packet record inspection.
+- Added audit and report integration for Proof of Records without asserting metadata truth, authority, ownership, authorship, authenticity, identity, legal validity, or legal admissibility.
 - Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
 - Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
 - Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.

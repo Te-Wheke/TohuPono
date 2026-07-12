@@ -8,12 +8,16 @@ from typing import Any
 from tohupono.concepts.registry import concept_registry, get_concept
 from tohupono.core.canonical_json import canonical_json_bytes
 from tohupono.core.file_identity import inspect_file
+from tohupono.records.validation import (
+    RECORDS_COLLECTION_SCHEMA_VERSION,
+    validate_manifest_records,
+)
 from tohupono.security.limits import MAX_LABEL_LENGTH
 from tohupono.timestamping.model import DEFAULT_TIMESTAMP_POLICY
 
 PROOF_CONCEPTS_SCHEMA_VERSION = "tohupono.proof_concepts.v1"
 DEFAULT_EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
-EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
+EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity", "records")
 CONCEPT_RESULT_STATUSES: tuple[str, ...] = ("PASS", "WARN", "FAIL", "UNPROVEN")
 _CONCEPT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BIDI_CONTROLS = {
@@ -114,13 +118,35 @@ def make_claim_id(concept_id: str, subject: dict[str, object], parameters: dict[
     return f"pcl_{digest[:32]}"
 
 
-def build_proof_concepts_declaration(file_sha256: str, concept_ids: tuple[str, ...]) -> dict[str, object]:
+def _record_ids_from_manifest_records(records: dict[str, object] | None) -> list[str]:
+    if not isinstance(records, dict):
+        return []
+    items = records.get("items")
+    if not isinstance(items, list):
+        return []
+    return sorted(
+        str(item["record_id"])
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("record_id"), str)
+    )
+
+
+def build_proof_concepts_declaration(
+    file_sha256: str,
+    concept_ids: tuple[str, ...],
+    records: dict[str, object] | None = None,
+) -> dict[str, object]:
     claims: list[dict[str, object]] = []
     for concept_id in concept_ids:
         subject = {"algorithm": "sha256", "digest": file_sha256}
         parameters: dict[str, object] = {}
         if concept_id == "existence":
             parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
+        elif concept_id == "records":
+            parameters = {
+                "record_ids": _record_ids_from_manifest_records(records),
+                "records_schema_version": RECORDS_COLLECTION_SCHEMA_VERSION,
+            }
         claims.append(
             {
                 "claim_id": make_claim_id(concept_id, subject, parameters),
@@ -180,11 +206,18 @@ def _invalid_declaration_result(message: str) -> dict[str, object]:
     }
 
 
-def _expected_claim(concept_id: str, file_sha256: str) -> dict[str, object]:
+def _expected_claim(concept_id: str, file_sha256: str, manifest: dict[str, Any]) -> dict[str, object]:
     subject = {"algorithm": "sha256", "digest": file_sha256}
     parameters: dict[str, object] = {}
     if concept_id == "existence":
         parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
+    elif concept_id == "records":
+        parameters = {
+            "record_ids": _record_ids_from_manifest_records(
+                manifest.get("records") if isinstance(manifest.get("records"), dict) else None
+            ),
+            "records_schema_version": RECORDS_COLLECTION_SCHEMA_VERSION,
+        }
     return {
         "claim_id": make_claim_id(concept_id, subject, parameters),
         "concept_id": concept_id,
@@ -198,6 +231,7 @@ def _validate_claim(
     *,
     requested: tuple[str, ...],
     file_sha256: str,
+    manifest: dict[str, Any],
     seen_claim_ids: set[str],
 ) -> tuple[str, dict[str, object]]:
     if not isinstance(claim, dict):
@@ -219,12 +253,19 @@ def _validate_claim(
     if concept_id not in requested:
         raise ValueError(f"Proof Concept claim is not requested: {concept_id}")
 
-    expected = _expected_claim(concept_id, file_sha256)
+    expected = _expected_claim(concept_id, file_sha256, manifest)
     if claim.get("subject") != expected["subject"]:
         raise ValueError(f"Proof Concept claim subject is invalid for {concept_id}.")
-    if claim.get("parameters") != expected["parameters"]:
-        raise ValueError(f"Proof Concept claim parameters are invalid for {concept_id}.")
-    if claim_id != expected["claim_id"]:
+    if concept_id == "records":
+        parameters = claim.get("parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("Proof of Records claim parameters must be an object.")
+        expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
+    else:
+        if claim.get("parameters") != expected["parameters"]:
+            raise ValueError(f"Proof Concept claim parameters are invalid for {concept_id}.")
+        expected_claim_id = str(expected["claim_id"])
+    if claim_id != expected_claim_id:
         raise ValueError(f"Proof Concept claim_id does not match canonical claim data for {concept_id}.")
     return concept_id, dict(claim)
 
@@ -258,6 +299,7 @@ def validate_proof_concepts_declaration(
             claim,
             requested=requested,
             file_sha256=file_sha256,
+            manifest=manifest,
             seen_claim_ids=seen_claim_ids,
         )
         if concept_id in seen_concepts:
@@ -401,6 +443,50 @@ def evaluate_existence(
     )
 
 
+def evaluate_records(
+    manifest: dict[str, Any],
+    *,
+    claim_id: str | None,
+    expected_record_ids: list[str],
+) -> dict[str, object]:
+    validation = validate_manifest_records(manifest, expected_record_ids=expected_record_ids)
+    checks: list[dict[str, str]] = []
+    for failure in validation.failures:
+        checks.append({"status": "FAIL", "message": failure})
+    for warning in validation.warnings:
+        checks.append({"status": "WARN", "message": warning})
+    if validation.status == "pass":
+        checks.insert(0, {"status": "PASS", "message": "record envelopes are canonical and linked to the subject digest."})
+    status = "PASS" if validation.status == "pass" else "FAIL"
+    evidence_summary = (
+        f"Record count {validation.record_count}; record IDs {', '.join(validation.record_ids) if validation.record_ids else 'none'}."
+    )
+    result = _result(
+        concept_id="records",
+        status=status,
+        claim_id=claim_id,
+        checks=checks,
+        limitations=validation.limitations,
+        evidence_summary=evidence_summary,
+    )
+    result["records"] = [
+        {
+            "attribute_count": len(record.get("attributes", {})) if isinstance(record.get("attributes"), dict) else 0,
+            "namespace": record.get("namespace"),
+            "record_id": record.get("record_id"),
+            "record_type": record.get("record_type"),
+            "reference": record.get("reference"),
+            "subject": record.get("subject"),
+        }
+        for record in validation.records
+    ]
+    result["record_count"] = validation.record_count
+    result["record_ids"] = validation.record_ids
+    result["failures"] = validation.failures
+    result["warnings"] = validation.warnings
+    return result
+
+
 def evaluate_declared_concepts(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -437,6 +523,14 @@ def evaluate_declared_concepts(
             results.append(
                 evaluate_existence(manifest_path, manifest, claim_id=claim_id, timestamp_policy=timestamp_policy)
             )
+        elif concept_id == "records":
+            parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}
+            raw_record_ids = parameters.get("record_ids") if isinstance(parameters, dict) else []
+            if parameters.get("records_schema_version") != RECORDS_COLLECTION_SCHEMA_VERSION:
+                expected_record_ids = ["__invalid_records_schema__"]
+            else:
+                expected_record_ids = [str(item) for item in raw_record_ids] if isinstance(raw_record_ids, list) else []
+            results.append(evaluate_records(manifest, claim_id=claim_id, expected_record_ids=expected_record_ids))
     return {
         "declared": list(requested),
         "inferred_legacy_checks": [],

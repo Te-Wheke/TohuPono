@@ -39,9 +39,10 @@ Proof Concept registry metadata is descriptive governance data. It must not alte
 The first executable Proof Concepts are:
 
 - `integrity`;
-- `existence`.
+- `existence`;
+- `records`.
 
-Registered concepts such as `authenticity`, `ownership`, `records`, `lineage`, and `reality` are not made executable merely by appearing in the registry.
+Registered concepts such as `authenticity`, `ownership`, `lineage`, and `reality` are not made executable merely by appearing in the registry.
 
 New proof manifests include a top-level `proof_concepts` declaration:
 
@@ -57,13 +58,39 @@ Claim records contain stable machine data: `claim_id`, `concept_id`, `subject`, 
 
 When no `--concept` option is supplied, `prove` defaults to `integrity` and `existence`. Concept IDs are sorted after validation, so CLI order does not alter proof identity. Changing the selected concept set does alter proof identity.
 
+Proof of Records is explicit and descriptor-driven. It is not included in the default concept set. A records proof requires `--concept records` and at least one `--record-json` descriptor. New records packets include a top-level `records` section:
+
+```json
+{
+  "schema_version": "tohupono.records.v1",
+  "items": [
+    {
+      "record_id": "rec_...",
+      "schema_version": "tohupono.record.v1",
+      "record_type": "generic",
+      "namespace": "local",
+      "reference": null,
+      "subject": {
+        "algorithm": "sha256",
+        "digest": "..."
+      },
+      "attributes": {}
+    }
+  ]
+}
+```
+
+`record_id` is derived from the canonical record body excluding `record_id`. Record envelopes are sorted by record ID, and descriptor file paths, descriptor filenames, registry prose, display names, maturity wording, and report text are excluded from record identity and proof identity.
+
+The `records` Proof Concept claim references every stored record ID exactly once. Verification fails if stored records and claimed record IDs diverge, if a record ID does not recompute, or if a record subject digest does not match the packet subject digest.
+
 Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
 
 Initial maturity assignments:
 
 - `integrity`: `locally_supported`;
 - `existence`: `locally_supported`, limited to local timestamp and imported-receipt handling;
-- `records`: `locally_supported`, limited to current packet, signature, chain, amendment and report support;
+- `records`: `locally_supported`, limited to canonical packet-internal record envelopes and subject-digest linkage;
 - `lineage`: `locally_supported`, limited to recorded relationships;
 - `authenticity`: `modelled`;
 - `ownership`: `modelled`;

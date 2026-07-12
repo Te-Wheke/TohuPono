@@ -51,6 +51,7 @@ def test_cli_help() -> None:
         "amend",
         "audit",
         "concept",
+        "record",
         "key",
         "report",
     ]:

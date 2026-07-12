@@ -26,6 +26,9 @@ tohupono timestamp verify proof_packet/ --json
 tohupono concept list
 tohupono concept inspect integrity --json
 tohupono prove ./file.pdf --concept integrity --concept existence --output proof_packet/
+tohupono prove ./file.pdf --concept records --record-json record.json --output proof_packet/
+tohupono record validate record.json
+tohupono record inspect proof_packet/ --json
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -93,19 +96,20 @@ Current v0.5.0 development introduces a conservative Proof Concepts registry. In
 
 - `integrity`: locally supported through byte digests and packet checks.
 - `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
-- `records`: locally supported for manifests, signatures, evidence chains, amendments, and reports, but not every external record-management requirement.
+- `records`: locally supported for canonical record envelopes and subject-digest linkage, but not metadata truth, authority, ownership, identity, authorship, authenticity, legal validity, or external record-management requirements.
 - `lineage`: locally supported for recorded relationships only; completeness of history is not proven.
 - `authenticity`: modelled, not established by digest or signature checks alone.
 - `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
 - `reality`: modelled as a long-term layered assessment only.
 
-The first executable Proof Concepts are `integrity` and `existence`.
+The current executable Proof Concepts are `integrity`, `existence`, and `records`.
 
 ```bash
 python -m tohupono concept list
 python -m tohupono concept list --json
 python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
+python -m tohupono concept inspect records --json
 ```
 
 `prove` accepts repeatable `--concept` options. When no concept is supplied, the default executable concept set is `integrity` and `existence`.
@@ -113,9 +117,24 @@ python -m tohupono concept inspect existence --json
 ```bash
 python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
+python -m tohupono prove ./file.bin --concept records --record-json ./record.json
 ```
 
 Concept selection is part of the deterministic proof identity. The selected concept IDs are canonicalised before hashing, so command-line ordering does not change identity. Registry prose, display names, maturity wording, roadmap text, and legal commentary are not included in deterministic claim bodies.
+
+Proof of Records is explicit and descriptor-driven. It is not added by default. A records proof requires `--concept records` plus one or more strict JSON descriptors supplied with `--record-json`.
+
+```json
+{
+  "schema_version": "tohupono.record_descriptor.v1",
+  "record_type": "generic",
+  "namespace": "local",
+  "reference": null,
+  "attributes": {}
+}
+```
+
+Record attributes are stored in the proof manifest. Do not place secrets, private keys, credentials, or unnecessarily sensitive information in record attributes. Proof of Records verifies packet-internal record envelope structure and subject linkage; it does not prove declared metadata truth, authority, ownership, authorship, authenticity, identity, legal status, or legal admissibility.
 
 Legacy packets without a `proof_concepts` declaration remain verifiable. TohuPono reports explicit declared concepts separately from inferred legacy checks and does not mutate old manifests.
 

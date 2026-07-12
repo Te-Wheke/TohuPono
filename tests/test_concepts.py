@@ -22,6 +22,7 @@ def test_concept_list_json_is_deterministic_and_sorted() -> None:
     executable = {item["concept_id"]: item["executable"] for item in data["concepts"]}
     assert executable["integrity"] is True
     assert executable["existence"] is True
+    assert executable["records"] is True
     assert executable["authenticity"] is False
 
 
@@ -42,7 +43,6 @@ def test_concept_inspect_known_and_unknown() -> None:
 
 def test_concept_registry_presence_does_not_imply_execution() -> None:
     records = {item["concept_id"]: item for item in concept_list_records()}
-    assert records["records"]["executable"] is False
     assert records["lineage"]["executable"] is False
     assert records["ownership"]["executable"] is False
     assert records["reality"]["executable"] is False

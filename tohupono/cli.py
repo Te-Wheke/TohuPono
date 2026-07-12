@@ -25,6 +25,7 @@ from tohupono.core.proof import (
     timestamp_verification_diagnostics,
 )
 from tohupono.reporting.pro_report import generate_report
+from tohupono.records.validation import load_record_descriptor, validate_manifest_records
 from tohupono.timestamping.model import (
     DEFAULT_TIMESTAMP_POLICY,
     TIMESTAMP_POLICIES,
@@ -172,6 +173,22 @@ def _print_packet_checks(result: dict[str, object]) -> None:
                 f"{item.get('status')}: {item.get('concept_id')} - "
                 f"{item.get('evidence_summary') or item.get('claim_boundary')}"
             )
+            if item.get("concept_id") == "records":
+                print(f"  records: {item.get('record_count', 0)}")
+                for record in item.get("records") or []:
+                    if not isinstance(record, dict):
+                        continue
+                    print(
+                        "  - "
+                        f"{record.get('record_id')} "
+                        f"type={record.get('record_type')} "
+                        f"namespace={record.get('namespace')} "
+                        f"reference={record.get('reference') if record.get('reference') is not None else 'none'}"
+                    )
+                for failure in item.get("failures") or []:
+                    print(f"  FAIL: {failure}")
+                for limitation in item.get("limitations") or []:
+                    print(f"  LIMIT: {limitation}")
 
 
 def _print_concept_list_human(records: list[dict[str, object]]) -> None:
@@ -208,6 +225,74 @@ def _print_concept_inspect_human(record: dict[str, object]) -> None:
     for item in record.get("privacy_implications", []):
         print(f"- {item}")
     print(f"Legal boundary: {record['legal_boundary']}")
+
+
+def _record_validation_summary(path: Path) -> dict[str, object]:
+    descriptor = load_record_descriptor(path)
+    attributes = descriptor.attributes
+    return {
+        "attribute_count": len(attributes),
+        "descriptor_schema_version": descriptor.schema_version,
+        "failures": [],
+        "namespace": descriptor.namespace,
+        "record_type": descriptor.record_type,
+        "reference_present": descriptor.reference is not None,
+        "status": "ok",
+        "warnings": [
+            "Descriptor validation does not prove declared metadata is true, authoritative, complete, or legally valid.",
+            "Do not place secret, credential, private-key, or unnecessarily sensitive information in record attributes.",
+        ],
+    }
+
+
+def _record_inspection(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    validation = validate_manifest_records(manifest)
+    return {
+        "failures": validation.failures,
+        "limitations": validation.limitations,
+        "manifest": str(manifest_path),
+        "record_count": validation.record_count,
+        "record_ids": validation.record_ids,
+        "records": validation.records,
+        "status": validation.status,
+        "warnings": validation.warnings,
+    }
+
+
+def _print_record_validate_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Descriptor schema: {result.get('descriptor_schema_version')}")
+    print(f"Record type: {result.get('record_type')}")
+    print(f"Namespace: {result.get('namespace')}")
+    print(f"Reference present: {'yes' if result.get('reference_present') else 'no'}")
+    print(f"Attribute count: {result.get('attribute_count')}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+
+
+def _print_record_inspect_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Record count: {result.get('record_count')}")
+    for record in result.get("records", []):
+        if not isinstance(record, dict):
+            continue
+        subject = record.get("subject") if isinstance(record.get("subject"), dict) else {}
+        attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+        print(f"Record ID: {record.get('record_id')}")
+        print(f"Record type: {record.get('record_type')}")
+        print(f"Namespace: {record.get('namespace')}")
+        print(f"Reference: {record.get('reference') if record.get('reference') is not None else 'none'}")
+        print(f"Subject algorithm: {subject.get('algorithm') if isinstance(subject, dict) else 'unknown'}")
+        print(f"Subject digest: {subject.get('digest') if isinstance(subject, dict) else 'unknown'}")
+        print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
+    for failure in result.get("failures", []):
+        print(f"FAIL: {failure}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+    for limitation in result.get("limitations", []):
+        print(f"LIMIT: {limitation}")
 
 
 def _inspect_timestamp(packet: Path) -> dict[str, object]:
@@ -392,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("--output", default="proof_packet")
     prove_cmd.add_argument("--include-payload", action="store_true")
     prove_cmd.add_argument("--concept", action="append", dest="concepts")
+    prove_cmd.add_argument("--record-json", action="append", dest="record_json")
 
     concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
     concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
@@ -400,6 +486,15 @@ def build_parser() -> argparse.ArgumentParser:
     concept_inspect_cmd = concept_sub.add_parser("inspect", help="Inspect one registered Proof Concept.")
     concept_inspect_cmd.add_argument("concept_id")
     concept_inspect_cmd.add_argument("--json", action="store_true")
+
+    record_cmd = sub.add_parser("record", help="Validate and inspect Proof of Records metadata.")
+    record_sub = record_cmd.add_subparsers(dest="record_command", required=True)
+    record_validate_cmd = record_sub.add_parser("validate", help="Validate a record descriptor JSON file.")
+    record_validate_cmd.add_argument("descriptor")
+    record_validate_cmd.add_argument("--json", action="store_true")
+    record_inspect_cmd = record_sub.add_parser("inspect", help="Inspect records stored in a proof packet.")
+    record_inspect_cmd.add_argument("packet")
+    record_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -519,6 +614,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 Path(args.output),
                 args.include_payload,
                 concept_ids=args.concepts,
+                record_descriptor_paths=[Path(item) for item in (args.record_json or [])],
             )
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
@@ -538,6 +634,22 @@ def run(argv: Sequence[str] | None = None) -> int:
                     _print_concept_inspect_human(record)
                 return EXIT_SUCCESS
             parser.error("Unknown concept command")
+        elif args.command == "record":
+            if args.record_command == "validate":
+                result = _record_validation_summary(Path(args.descriptor))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_record_validate_human(result)
+                return EXIT_SUCCESS
+            if args.record_command == "inspect":
+                result = _record_inspection(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_record_inspect_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown record command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))
