@@ -22,6 +22,10 @@
 - Added repeatable `prove --provenance-json` for explicit `--concept provenance` proofs.
 - Added `tohupono provenance validate` and `tohupono provenance inspect` for descriptor validation and packet provenance inspection.
 - Added audit and report integration for Proof of Provenance without asserting parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
+- Added executable Proof of Transaction support through strict JSON transaction descriptors, canonical transaction envelopes, deterministic `txn_...` transaction IDs, subject binding, participant canonicalisation, and transaction claim linkage.
+- Added repeatable `prove --transaction-json` for explicit `--concept transaction` proofs.
+- Added `tohupono transaction validate` and `tohupono transaction inspect` for descriptor validation and packet transaction inspection.
+- Added audit and report integration for Proof of Transaction without asserting transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, or enforceability.
 - Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
 - Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
 - Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.

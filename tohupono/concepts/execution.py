@@ -23,10 +23,15 @@ from tohupono.records.validation import (
 )
 from tohupono.security.limits import MAX_LABEL_LENGTH
 from tohupono.timestamping.model import DEFAULT_TIMESTAMP_POLICY
+from tohupono.transaction.validation import (
+    TRANSACTION_COLLECTION_SCHEMA_VERSION,
+    transaction_ids_from_collection,
+    validate_manifest_transactions,
+)
 
 PROOF_CONCEPTS_SCHEMA_VERSION = "tohupono.proof_concepts.v1"
 DEFAULT_EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
-EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "provenance", "records")
+EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "provenance", "records", "transaction")
 CONCEPT_RESULT_STATUSES: tuple[str, ...] = ("PASS", "WARN", "FAIL", "UNPROVEN")
 _CONCEPT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BIDI_CONTROLS = {
@@ -164,12 +169,21 @@ def _provenance_claim_parameters(file_sha256: str, provenance: dict[str, object]
     }
 
 
+def _transaction_claim_parameters(file_sha256: str, transactions: dict[str, object] | None) -> dict[str, object]:
+    return {
+        "subject": {"algorithm": "sha256", "digest": file_sha256},
+        "transaction_ids": transaction_ids_from_collection(transactions),
+        "transactions_schema_version": TRANSACTION_COLLECTION_SCHEMA_VERSION,
+    }
+
+
 def build_proof_concepts_declaration(
     file_sha256: str,
     concept_ids: tuple[str, ...],
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
 ) -> dict[str, object]:
     claims: list[dict[str, object]] = []
     for concept_id in concept_ids:
@@ -181,6 +195,8 @@ def build_proof_concepts_declaration(
             parameters = _custody_claim_parameters(custody)
         elif concept_id == "provenance":
             parameters = _provenance_claim_parameters(file_sha256, provenance)
+        elif concept_id == "transaction":
+            parameters = _transaction_claim_parameters(file_sha256, transactions)
         elif concept_id == "records":
             parameters = {
                 "record_ids": _record_ids_from_manifest_records(records),
@@ -254,6 +270,8 @@ def _expected_claim(concept_id: str, file_sha256: str, manifest: dict[str, Any])
         parameters = _custody_claim_parameters(manifest.get("custody") if isinstance(manifest.get("custody"), dict) else None)
     elif concept_id == "provenance":
         parameters = _provenance_claim_parameters(file_sha256, manifest.get("provenance") if isinstance(manifest.get("provenance"), dict) else None)
+    elif concept_id == "transaction":
+        parameters = _transaction_claim_parameters(file_sha256, manifest.get("transactions") if isinstance(manifest.get("transactions"), dict) else None)
     elif concept_id == "records":
         parameters = {
             "record_ids": _record_ids_from_manifest_records(
@@ -313,6 +331,11 @@ def _validate_claim(
         parameters = claim.get("parameters")
         if not isinstance(parameters, dict):
             raise ValueError("Proof of Provenance claim parameters must be an object.")
+        expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
+    elif concept_id == "transaction":
+        parameters = claim.get("parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("Proof of Transaction claim parameters must be an object.")
         expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
     else:
         if claim.get("parameters") != expected["parameters"]:
@@ -649,6 +672,59 @@ def evaluate_provenance(
     return result
 
 
+def evaluate_transaction(
+    manifest: dict[str, Any],
+    *,
+    claim_id: str | None,
+    expected_transaction_ids: list[str],
+    expected_subject: dict[str, object] | None,
+) -> dict[str, object]:
+    validation = validate_manifest_transactions(
+        manifest,
+        expected_transaction_ids=expected_transaction_ids,
+        expected_subject=expected_subject,
+    )
+    checks: list[dict[str, str]] = []
+    for failure in validation.failures:
+        checks.append({"status": "FAIL", "message": failure})
+    for warning in validation.warnings:
+        checks.append({"status": "WARN", "message": warning})
+    if validation.status == "pass":
+        checks.insert(0, {"status": "PASS", "message": "transaction envelopes are canonical and linked to the subject digest."})
+    status = "PASS" if validation.status == "pass" else "FAIL"
+    evidence_summary = (
+        f"Transaction count {validation.transaction_count}; transaction IDs {', '.join(validation.transaction_ids) if validation.transaction_ids else 'none'}."
+    )
+    result = _result(
+        concept_id="transaction",
+        status=status,
+        claim_id=claim_id,
+        checks=checks,
+        limitations=validation.limitations,
+        evidence_summary=evidence_summary,
+    )
+    result["transaction_schema_status"] = validation.transaction_schema_status
+    result["transaction_count"] = validation.transaction_count
+    result["transaction_ids"] = validation.transaction_ids
+    result["transactions"] = [
+        {
+            "attribute_count": len(item.get("attributes", {})) if isinstance(item.get("attributes"), dict) else 0,
+            "occurred_at": item.get("occurred_at"),
+            "participant_count": len(item.get("participants", [])) if isinstance(item.get("participants"), list) else 0,
+            "participants": item.get("participants"),
+            "reference": item.get("reference"),
+            "subject": item.get("subject"),
+            "terms_count": len(item.get("terms", {})) if isinstance(item.get("terms"), dict) else 0,
+            "transaction_id": item.get("transaction_id"),
+            "transaction_type": item.get("transaction_type"),
+        }
+        for item in validation.transactions
+    ]
+    result["failures"] = validation.failures
+    result["warnings"] = validation.warnings
+    return result
+
+
 def evaluate_declared_concepts(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -725,6 +801,22 @@ def evaluate_declared_concepts(
             else:
                 expected_record_ids = [str(item) for item in raw_record_ids] if isinstance(raw_record_ids, list) else []
             results.append(evaluate_records(manifest, claim_id=claim_id, expected_record_ids=expected_record_ids))
+        elif concept_id == "transaction":
+            parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}
+            raw_transaction_ids = parameters.get("transaction_ids") if isinstance(parameters, dict) else []
+            if parameters.get("transactions_schema_version") != TRANSACTION_COLLECTION_SCHEMA_VERSION:
+                expected_transaction_ids = ["__invalid_transaction_schema__"]
+            else:
+                expected_transaction_ids = [str(item) for item in raw_transaction_ids] if isinstance(raw_transaction_ids, list) else []
+            subject = parameters.get("subject") if isinstance(parameters.get("subject"), dict) else {"algorithm": "sha256", "digest": "__invalid_transaction_subject__"}
+            results.append(
+                evaluate_transaction(
+                    manifest,
+                    claim_id=claim_id,
+                    expected_transaction_ids=expected_transaction_ids,
+                    expected_subject=subject,
+                )
+            )
     return {
         "declared": list(requested),
         "inferred_legacy_checks": [],

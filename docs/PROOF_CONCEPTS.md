@@ -6,7 +6,7 @@ A Proof Concept is a bounded claim model. It defines what is being claimed, what
 
 Registry presence does not imply operational support.
 
-Executable status is controlled by a separate execution registry. In this slice, `integrity`, `existence`, `records`, `custody`, and `provenance` are executable.
+Executable status is controlled by a separate execution registry. In this slice, `integrity`, `existence`, `records`, `custody`, `provenance`, and `transaction` are executable.
 
 ## Maturity Values
 
@@ -44,6 +44,7 @@ These are not binary REAL or FAKE labels.
 | records | locally_supported | Canonical record envelopes can be declared, stored, linked to the subject digest, and verified for packet-internal consistency. Declared metadata truth, authority, completeness, ownership, identity, authorship, authenticity, legal validity, and external record-management requirements are not established. |
 | custody | locally_supported | Canonical custody-event envelopes can be declared, hash-linked, bound to the subject digest, and verified for retained packet-internal consistency. Physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, and legal admissibility are not established. |
 | provenance | locally_supported | Canonical declared lineage edges can be bound to the subject digest and declared parent digests. Parent existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, truth, complete lineage, legal validity, and external registration are not established. |
+| transaction | locally_supported | Canonical declared transaction envelopes can be bound to the subject digest and declared participants. Transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, and enforceability are not established. |
 | lineage | locally_supported | Recorded relationships are assessed; completeness of history is not proven. |
 | authenticity | modelled | Digest and signature checks do not establish real-world authenticity. |
 | ownership | modelled | Requires identity, authority, entitlement and jurisdiction-specific external evidence. |
@@ -85,6 +86,7 @@ python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
 python -m tohupono concept inspect custody --json
 python -m tohupono concept inspect provenance --json
+python -m tohupono concept inspect transaction --json
 ```
 
 `concept list` reports concept ID, display name, maturity, executable status, and concise claim boundary. `concept inspect` expands the exact claim, subject, evidence, verification procedure, trust assumptions, failure conditions, limitations, privacy implications, and legal boundary.
@@ -99,6 +101,7 @@ python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
 python -m tohupono prove ./file.bin --concept custody --custody-json ./custody.json
 python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
+python -m tohupono prove ./file.bin --concept transaction --transaction-json ./transfer.json
 ```
 
 When no concept is supplied, `prove` requests `integrity` and `existence`. TohuPono does not provide `--all`; a proof operation must not silently claim every registered concept.
@@ -110,6 +113,8 @@ The selected concept IDs are canonicalised and stored in the manifest. Changing 
 `custody` is not part of the default concept set. To request Proof of Custody, select `--concept custody` and provide at least one strict JSON descriptor with `--custody-json`. Supplying `--custody-json` without selecting `custody` is an input error.
 
 `provenance` is not part of the default concept set. To request Proof of Provenance, select `--concept provenance` and provide at least one strict JSON descriptor with `--provenance-json`. Supplying `--provenance-json` without selecting `provenance` is an input error.
+
+`transaction` is not part of the default concept set. To request Proof of Transaction, select `--concept transaction` and provide at least one strict JSON descriptor with `--transaction-json`. Supplying `--transaction-json` without selecting `transaction` is an input error.
 
 ## Proof of Records
 
@@ -184,6 +189,14 @@ Proof of Provenance makes a narrow packet-internal claim: the proof packet conta
 It does not prove that parent files exist, that declared transformations occurred, verified origin, authorship, ownership, authenticity, authority, consent, content truth, complete lineage, legal validity, external registration, or external timestamp validity. Parent digests, operations, actors, references, occurred-time values, and attributes are declared metadata only.
 
 Provenance descriptors use strict JSON and create canonical `prv_...` edge identifiers. The current proved subject digest is injected as the child; descriptors cannot provide child digests or edge IDs.
+
+## Proof of Transaction
+
+Proof of Transaction makes a narrow packet-internal claim: the proof packet contains canonical declared transaction envelopes binding the recorded subject digest to declared participants and transaction metadata, and the retained declarations are internally consistent.
+
+It does not prove that a transaction occurred, payment occurred, delivery occurred, participants are verified identities, participants consented, participants had authority, ownership transferred, a contract formed, legal validity, enforceability, authenticity, authorship, external registration, external timestamp validity, or complete transaction history. Participants, references, terms, occurred-time values, and attributes are declared metadata only.
+
+Transaction descriptors use strict JSON and create canonical `txn_...` identifiers. The current proved subject digest is injected; descriptors cannot provide subject digests, transaction IDs, proof IDs, or claim IDs.
 
 ## Legacy Packets
 

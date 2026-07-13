@@ -98,12 +98,13 @@ Current v0.5.0 development introduces a conservative Proof Concepts registry. In
 - `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
 - `records`: locally supported for canonical record envelopes and subject-digest linkage, but not metadata truth, authority, ownership, identity, authorship, authenticity, legal validity, or external record-management requirements.
 - `provenance`: locally supported for canonical declared lineage edges and child/parent digest linkage, but not parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
+- `transaction`: locally supported for canonical declared transaction envelopes and subject-digest linkage, but not transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, or enforceability.
 - `lineage`: locally supported for recorded relationships only; completeness of history is not proven.
 - `authenticity`: modelled, not established by digest or signature checks alone.
 - `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
 - `reality`: modelled as a long-term layered assessment only.
 
-The current executable Proof Concepts are `integrity`, `existence`, `records`, `custody`, and `provenance`.
+The current executable Proof Concepts are `integrity`, `existence`, `records`, `custody`, `provenance`, and `transaction`.
 
 ```bash
 python -m tohupono concept list
@@ -112,6 +113,7 @@ python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
 python -m tohupono concept inspect provenance --json
+python -m tohupono concept inspect transaction --json
 ```
 
 `prove` accepts repeatable `--concept` options. When no concept is supplied, the default executable concept set is `integrity` and `existence`.
@@ -121,6 +123,7 @@ python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
 python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
+python -m tohupono prove ./file.bin --concept transaction --transaction-json ./transfer.json
 ```
 
 Concept selection is part of the deterministic proof identity. The selected concept IDs are canonicalised before hashing, so command-line ordering does not change identity. Registry prose, display names, maturity wording, roadmap text, and legal commentary are not included in deterministic claim bodies.
@@ -271,6 +274,10 @@ Custody descriptors are strict JSON. Do not place credentials, private keys, sec
 Proof of Provenance is an explicit Proof Concept, not a default. It stores canonical declared lineage edge envelopes in the manifest and verifies child digest binding, parent digest structure, edge identifiers, deterministic ordering, and claim linkage. It does not prove that parent files exist, that declared transformations occurred, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
 
 Provenance descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.
+
+Proof of Transaction is an explicit Proof Concept, not a default. It stores canonical declared transaction envelopes in the manifest and verifies subject binding, participant structure, transaction identifiers, deterministic ordering, and claim linkage. It does not prove that a transaction, payment, delivery, consent, ownership transfer, or legal agreement occurred.
+
+Transaction descriptors are strict JSON. Do not place credentials, private keys, secrets, payment credentials, unnecessary personal information, or sensitive contractual information in transaction descriptors.
 
 Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
 

@@ -45,6 +45,12 @@ from tohupono.timestamping.model import (
     local_timestamp_proof,
     make_receipt_id,
 )
+from tohupono.transaction.validation import (
+    build_transaction_collection,
+    build_transaction_envelope,
+    load_transaction_descriptor,
+    transaction_ids_from_collection,
+)
 from tohupono.security.limits import MAX_RECEIPT_BYTES, MAX_RECEIPT_METADATA_BYTES
 from tohupono.security.paths import safe_child_path
 from tohupono.trust.keys import (
@@ -78,6 +84,7 @@ class ProofManifest:
     records: dict[str, object] | None
     custody: dict[str, object] | None
     provenance: dict[str, object] | None
+    transactions: dict[str, object] | None
     evidence: dict[str, list[dict[str, object]]]
     timestamping: dict[str, object]
     trust_policy: dict[str, str]
@@ -100,6 +107,7 @@ def proof_id_seed(
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
 ) -> dict[str, object]:
     concepts = validate_requested_concepts(list(concept_ids)) if concept_ids is not None else ()
     seed = {
@@ -135,6 +143,11 @@ def proof_id_seed(
             "edge_ids": provenance_edge_ids_from_collection(provenance),
             "schema_version": provenance.get("schema_version") if isinstance(provenance, dict) else None,
         }
+    if transactions is not None:
+        seed["transactions"] = {
+            "schema_version": transactions.get("schema_version") if isinstance(transactions, dict) else None,
+            "transaction_ids": transaction_ids_from_collection(transactions),
+        }
     return seed
 
 
@@ -145,9 +158,10 @@ def make_proof_id(
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
 ) -> str:
     digest = hashlib.sha256(
-        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody, provenance))
+        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody, provenance, transactions))
     ).hexdigest()
     return f"tp_{digest[:32]}"
 
@@ -274,12 +288,13 @@ def build_manifest(
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
 ) -> ProofManifest:
     selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
     warnings: list[str] = []
     if identity.blake3 is None:
         warnings.append("BLAKE3 unavailable; optional BLAKE3 digest was not recorded.")
-    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody, provenance)
+    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody, provenance, transactions)
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
@@ -297,10 +312,11 @@ def build_manifest(
                 "evidence_refs": [],
             }
         ],
-        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody, provenance),
+        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody, provenance, transactions),
         records=records,
         custody=custody,
         provenance=provenance,
+        transactions=transactions,
         evidence={
             "hashes": [],
             "timestamps": [],
@@ -392,6 +408,7 @@ def create_proof_packet(
     record_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
     custody_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
     provenance_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    transaction_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
 ) -> ProofManifest:
     identity = inspect_file(source)
     sealed_at = sealed_at_utc or utc_now_iso()
@@ -411,6 +428,11 @@ def create_proof_packet(
         raise ValueError("Proof of Provenance requires at least one --provenance-json descriptor.")
     if provenance_paths and "provenance" not in selected_concepts:
         raise ValueError("--provenance-json requires selecting --concept provenance.")
+    transaction_paths = list(transaction_descriptor_paths or [])
+    if "transaction" in selected_concepts and not transaction_paths:
+        raise ValueError("Proof of Transaction requires at least one --transaction-json descriptor.")
+    if transaction_paths and "transaction" not in selected_concepts:
+        raise ValueError("--transaction-json requires selecting --concept transaction.")
     record_collection: dict[str, object] | None = None
     if record_paths:
         envelopes: list[RecordEnvelope] = []
@@ -443,7 +465,18 @@ def create_proof_packet(
             for descriptor_path in provenance_paths
         ]
         provenance_collection = build_provenance_collection(edges)
-    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection, provenance_collection)
+    transaction_collection: dict[str, object] | None = None
+    if transaction_paths:
+        transactions = [
+            build_transaction_envelope(
+                load_transaction_descriptor(descriptor_path),
+                subject_algorithm="sha256",
+                subject_digest=identity.sha256,
+            )
+            for descriptor_path in transaction_paths
+        ]
+        transaction_collection = build_transaction_collection(transactions)
+    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection, provenance_collection, transaction_collection)
     _assert_can_create_packet(output)
     output.mkdir(parents=True, exist_ok=True)
 
@@ -455,6 +488,8 @@ def create_proof_packet(
         manifest_dict.pop("custody", None)
     if manifest_dict.get("provenance") is None:
         manifest_dict.pop("provenance", None)
+    if manifest_dict.get("transactions") is None:
+        manifest_dict.pop("transactions", None)
     manifest_dict["timestamping"] = local_timestamp_proof(identity.sha256, sealed_at).to_dict()
     sealed_event = build_evidence_event(
         event_type="sealed",

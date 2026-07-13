@@ -220,6 +220,36 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
                     )
                 )
                 story.append(provenance_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "transaction":
+                continue
+            transactions = result.get("transactions") if isinstance(result.get("transactions"), list) else []
+            rows = [["Transaction ID", "Type", "Participants", "Declared Time"]]
+            for item in transactions:
+                if not isinstance(item, dict):
+                    continue
+                rows.append(
+                    [
+                        _safe(item.get("transaction_id")),
+                        _safe(item.get("transaction_type")),
+                        _safe(item.get("participant_count")),
+                        _safe(item.get("occurred_at") or "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Transaction Details", styles["Heading3"]))
+                transaction_table = Table(rows, colWidths=[145, 85, 80, 170])
+                transaction_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(transaction_table)
     else:
         story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
     story.append(
@@ -247,6 +277,13 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         Paragraph(
             "Proof of Provenance verifies canonical declared lineage relationships retained in the packet. "
             "It does not independently prove that parent files exist, that declared transformations occurred, or that lineage is complete, authentic, or authoritative.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Transaction verifies canonical declared transaction envelopes retained in the packet. "
+            "It does not independently prove that a transaction, payment, delivery, consent, ownership transfer, or legal agreement occurred.",
             styles["Normal"],
         )
     )

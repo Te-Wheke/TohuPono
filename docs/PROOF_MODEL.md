@@ -42,7 +42,8 @@ The first executable Proof Concepts are:
 - `existence`;
 - `records`.
 - `custody`;
-- `provenance`.
+- `provenance`;
+- `transaction`.
 
 Registered concepts such as `authenticity`, `ownership`, and `reality` are not made executable merely by appearing in the registry.
 
@@ -128,6 +129,12 @@ Proof of Provenance is explicit and descriptor-driven. It is not included in the
 
 The `provenance` Proof Concept claim references stored edge IDs and the child digest. Verification fails if the claim and stored provenance section diverge.
 
+Proof of Transaction is explicit and descriptor-driven. It is not included in the default concept set. A transaction proof requires `--concept transaction` and at least one `--transaction-json` descriptor. New transaction packets include a top-level `transactions` section with `schema_version`, `transaction_count`, and canonical transaction envelopes sorted by `transaction_id`.
+
+`transaction_id` is `txn_` plus the first 32 hexadecimal characters of SHA-256 over the canonical transaction body excluding `transaction_id`. The subject digest is injected from the proved subject. Participants, references, terms, occurred-time values, and attributes are declared metadata only.
+
+The `transaction` Proof Concept claim references stored transaction IDs and the subject digest. Verification fails if the claim and stored transaction section diverge.
+
 Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
 
 Initial maturity assignments:
@@ -137,6 +144,7 @@ Initial maturity assignments:
 - `records`: `locally_supported`, limited to canonical packet-internal record envelopes and subject-digest linkage;
 - `custody`: `locally_supported`, limited to canonical packet-internal custody-event envelopes and retained hash-link consistency;
 - `provenance`: `locally_supported`, limited to canonical packet-internal declared lineage edges and child/parent digest linkage;
+- `transaction`: `locally_supported`, limited to canonical packet-internal declared transaction envelopes and subject/participant linkage;
 - `lineage`: `locally_supported`, limited to recorded relationships;
 - `authenticity`: `modelled`;
 - `ownership`: `modelled`;

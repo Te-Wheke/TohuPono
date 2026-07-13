@@ -35,6 +35,7 @@ from tohupono.timestamping.model import (
     TimestampReceiptConflictError,
     inspect_manifest_timestamping,
 )
+from tohupono.transaction.validation import load_transaction_descriptor, validate_manifest_transactions
 from tohupono.trust.keys import (
     KeyConflictError,
     KeyErrorWithAction,
@@ -231,6 +232,28 @@ def _print_packet_checks(result: dict[str, object]) -> None:
                     print(f"  FAIL: {failure}")
                 for limitation in item.get("limitations") or []:
                     print(f"  LIMIT: {limitation}")
+            if item.get("concept_id") == "transaction":
+                print(f"  transactions: {item.get('transaction_count', 0)}")
+                for txn in item.get("transactions") or []:
+                    if not isinstance(txn, dict):
+                        continue
+                    participants = txn.get("participants") if isinstance(txn.get("participants"), list) else []
+                    roles = [
+                        str(participant.get("role"))
+                        for participant in participants
+                        if isinstance(participant, dict) and participant.get("role")
+                    ]
+                    print(
+                        "  - "
+                        f"{txn.get('transaction_id')} "
+                        f"type={txn.get('transaction_type')} "
+                        f"participants={txn.get('participant_count', len(roles))} "
+                        f"roles={','.join(roles) if roles else 'none'}"
+                    )
+                for failure in item.get("failures") or []:
+                    print(f"  FAIL: {failure}")
+                for limitation in item.get("limitations") or []:
+                    print(f"  LIMIT: {limitation}")
 
 
 def _print_concept_list_human(records: list[dict[str, object]]) -> None:
@@ -342,6 +365,89 @@ def _print_provenance_inspect_human(result: dict[str, object]) -> None:
         print(f"Operation: {operation.get('name') if isinstance(operation, dict) else 'none'}")
         print(f"Declared actor: {actor.get('namespace') + '/' + actor.get('identifier') if isinstance(actor, dict) else 'none'}")
         print(f"Declared time: {edge.get('occurred_at') or 'none'}")
+        print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
+    for failure in result.get("failures", []):
+        print(f"FAIL: {failure}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+    for limitation in result.get("limitations", []):
+        print(f"LIMIT: {limitation}")
+
+
+def _transaction_validation_summary(path: Path) -> dict[str, object]:
+    descriptor = load_transaction_descriptor(path)
+    return {
+        "attribute_count": len(descriptor.attributes),
+        "declared_time_present": descriptor.occurred_at is not None,
+        "descriptor_schema_version": descriptor.schema_version,
+        "failures": [],
+        "participant_count": len(descriptor.participants),
+        "participant_roles": [participant["role"] for participant in descriptor.participants],
+        "reference_present": descriptor.reference is not None,
+        "status": "ok",
+        "terms_count": len(descriptor.terms),
+        "transaction_type": descriptor.transaction_type,
+        "warnings": [
+            "Descriptor validation does not prove that a transaction, payment, delivery, consent, or legal agreement occurred.",
+            "Do not place credentials, private keys, secrets, payment credentials, unnecessary personal information, or sensitive contractual information in transaction descriptors.",
+        ],
+    }
+
+
+def _transaction_inspection(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    validation = validate_manifest_transactions(manifest)
+    return {
+        "failures": validation.failures,
+        "limitations": validation.limitations,
+        "manifest": str(manifest_path),
+        "status": validation.status,
+        "transaction_count": validation.transaction_count,
+        "transaction_ids": validation.transaction_ids,
+        "transaction_schema_status": validation.transaction_schema_status,
+        "transactions": validation.transactions,
+        "warnings": validation.warnings,
+    }
+
+
+def _print_transaction_validate_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Descriptor schema: {result.get('descriptor_schema_version')}")
+    print(f"Transaction type: {result.get('transaction_type')}")
+    print(f"Participant count: {result.get('participant_count')}")
+    print(f"Participant roles: {', '.join(str(item) for item in result.get('participant_roles', []))}")
+    print(f"Declared time present: {'yes' if result.get('declared_time_present') else 'no'}")
+    print(f"Reference present: {'yes' if result.get('reference_present') else 'no'}")
+    print(f"Terms item count: {result.get('terms_count')}")
+    print(f"Attribute count: {result.get('attribute_count')}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+
+
+def _print_transaction_inspect_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Transaction schema: {result.get('transaction_schema_status')}")
+    print(f"Transaction count: {result.get('transaction_count')}")
+    for item in result.get("transactions", []):
+        if not isinstance(item, dict):
+            continue
+        participants = item.get("participants") if isinstance(item.get("participants"), list) else []
+        terms = item.get("terms") if isinstance(item.get("terms"), dict) else {}
+        attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        print(f"Transaction ID: {item.get('transaction_id')}")
+        print(f"Transaction type: {item.get('transaction_type')}")
+        print(f"Declared time: {item.get('occurred_at') or 'none'}")
+        print(f"Reference present: {'yes' if item.get('reference') is not None else 'no'}")
+        print(f"Participant count: {len(participants) if isinstance(participants, list) else 0}")
+        for participant in participants:
+            if isinstance(participant, dict):
+                print(
+                    "Participant: "
+                    f"role={participant.get('role')} "
+                    f"declared={participant.get('namespace')}/{participant.get('identifier')}"
+                )
+        print(f"Terms item count: {len(terms) if isinstance(terms, dict) else 0}")
         print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
     for failure in result.get("failures", []):
         print(f"FAIL: {failure}")
@@ -683,6 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("--record-json", action="append", dest="record_json")
     prove_cmd.add_argument("--custody-json", action="append", dest="custody_json")
     prove_cmd.add_argument("--provenance-json", action="append", dest="provenance_json")
+    prove_cmd.add_argument("--transaction-json", action="append", dest="transaction_json")
 
     concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
     concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
@@ -718,6 +825,15 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_inspect_cmd = provenance_sub.add_parser("inspect", help="Inspect provenance edges stored in a proof packet.")
     provenance_inspect_cmd.add_argument("packet")
     provenance_inspect_cmd.add_argument("--json", action="store_true")
+
+    transaction_cmd = sub.add_parser("transaction", help="Validate and inspect Proof of Transaction metadata.")
+    transaction_sub = transaction_cmd.add_subparsers(dest="transaction_command", required=True)
+    transaction_validate_cmd = transaction_sub.add_parser("validate", help="Validate a transaction descriptor JSON file.")
+    transaction_validate_cmd.add_argument("descriptor")
+    transaction_validate_cmd.add_argument("--json", action="store_true")
+    transaction_inspect_cmd = transaction_sub.add_parser("inspect", help="Inspect transactions stored in a proof packet.")
+    transaction_inspect_cmd.add_argument("packet")
+    transaction_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -840,6 +956,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 record_descriptor_paths=[Path(item) for item in (args.record_json or [])],
                 custody_descriptor_paths=[Path(item) for item in (args.custody_json or [])],
                 provenance_descriptor_paths=[Path(item) for item in (args.provenance_json or [])],
+                transaction_descriptor_paths=[Path(item) for item in (args.transaction_json or [])],
             )
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
@@ -907,6 +1024,22 @@ def run(argv: Sequence[str] | None = None) -> int:
                     _print_provenance_inspect_human(result)
                 return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
             parser.error("Unknown provenance command")
+        elif args.command == "transaction":
+            if args.transaction_command == "validate":
+                result = _transaction_validation_summary(Path(args.descriptor))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_transaction_validate_human(result)
+                return EXIT_SUCCESS
+            if args.transaction_command == "inspect":
+                result = _transaction_inspection(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_transaction_inspect_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown transaction command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))

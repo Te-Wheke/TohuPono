@@ -15,7 +15,7 @@ The project distinguishes:
 
 Proof Concepts are not interchangeable. Registry presence does not imply operational support, and support for integrity does not imply support for authenticity, ownership, authorship, truth, or Proof of Reality.
 
-Executable concept support is currently limited to `integrity`, `existence`, `records`, `custody`, and `provenance`.
+Executable concept support is currently limited to `integrity`, `existence`, `records`, `custody`, `provenance`, and `transaction`.
 
 - `integrity` checks whether supplied bytes match the recorded digest.
 - `existence` reviews available timestamp evidence for the recorded digest.
@@ -51,3 +51,5 @@ Manifest signatures and report signatures are separate trust layers:
 If a manifest or evidence chain is edited after sealing, verification should fail where the edit is detectable.
 
 `provenance` does not prove parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, identity, authority, consent, content truth, originality, first creation, complete lineage, absence of omitted intermediate versions, legal validity, external registration, or external timestamp validity. Provenance parents, operations, actors, references, occurred-time values, and attributes are user-declared manifest data. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.
+
+`transaction` does not prove transaction occurrence, payment, delivery, participant identity, consent, authority, ownership before or after the declaration, ownership transfer, contractual formation, legal validity, enforceability, authenticity, authorship, external registration, external timestamp validity, or completeness of transaction history. Transaction participants, references, terms, occurred-time values, and attributes are user-declared manifest data. Do not place credentials, private keys, secrets, payment credentials, unnecessary personal information, or sensitive contractual information in transaction descriptors.
