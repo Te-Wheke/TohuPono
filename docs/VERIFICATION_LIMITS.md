@@ -15,11 +15,12 @@ The project distinguishes:
 
 Proof Concepts are not interchangeable. Registry presence does not imply operational support, and support for integrity does not imply support for authenticity, ownership, authorship, truth, or Proof of Reality.
 
-Executable concept support is currently limited to `integrity`, `existence`, and `records`.
+Executable concept support is currently limited to `integrity`, `existence`, `records`, and `custody`.
 
 - `integrity` checks whether supplied bytes match the recorded digest.
 - `existence` reviews available timestamp evidence for the recorded digest.
 - `records` verifies canonical record envelopes and their link to the packet subject digest.
+- `custody` verifies canonical custody-event envelopes, retained hash links, subject binding, and claim linkage.
 
 `integrity` does not prove authenticity, authorship, ownership, legal identity, original creation, truth, or absence of earlier manipulation.
 
@@ -28,6 +29,8 @@ Executable concept support is currently limited to `integrity`, `existence`, and
 Other registered concepts remain non-executable until a future implementation defines the required evidence and verification procedure.
 
 `records` does not prove declared metadata truth, external registration, authority, ownership, identity, authorship, authenticity, legal validity, legal admissibility, completeness of history, or accuracy of an external reference. Record attributes are user-declared manifest data and may be sensitive; do not place secrets, private keys, credentials, or unnecessary private metadata in record attributes.
+
+`custody` does not prove physical possession, actor identity, legal custody, ownership, authorship, authenticity, authority, consent, content truth, complete event history, absence of earlier or later events, external timestamp validity, immutability, legal validity, or legal admissibility. Custody actors, locations, references, occurred-time values, and attributes are user-declared manifest data. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
 
 `docs/CLAIM_MATURITY.md` defines which claim language is safe at each maturity level and how integrity gaps are classified.
 

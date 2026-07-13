@@ -42,6 +42,7 @@ These are not binary REAL or FAKE labels.
 | integrity | locally_supported | Digest and packet checks support byte-level integrity only. |
 | existence | locally_supported | Local timestamp and imported-receipt handling are available; independently verified external timestamping is absent. |
 | records | locally_supported | Canonical record envelopes can be declared, stored, linked to the subject digest, and verified for packet-internal consistency. Declared metadata truth, authority, completeness, ownership, identity, authorship, authenticity, legal validity, and external record-management requirements are not established. |
+| custody | locally_supported | Canonical custody-event envelopes can be declared, hash-linked, bound to the subject digest, and verified for retained packet-internal consistency. Physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, and legal admissibility are not established. |
 | lineage | locally_supported | Recorded relationships are assessed; completeness of history is not proven. |
 | authenticity | modelled | Digest and signature checks do not establish real-world authenticity. |
 | ownership | modelled | Requires identity, authority, entitlement and jurisdiction-specific external evidence. |
@@ -81,6 +82,7 @@ python -m tohupono concept list --json
 python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
+python -m tohupono concept inspect custody --json
 ```
 
 `concept list` reports concept ID, display name, maturity, executable status, and concise claim boundary. `concept inspect` expands the exact claim, subject, evidence, verification procedure, trust assumptions, failure conditions, limitations, privacy implications, and legal boundary.
@@ -93,6 +95,7 @@ python -m tohupono concept inspect records --json
 python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
+python -m tohupono prove ./file.bin --concept custody --custody-json ./custody.json
 ```
 
 When no concept is supplied, `prove` requests `integrity` and `existence`. TohuPono does not provide `--all`; a proof operation must not silently claim every registered concept.
@@ -100,6 +103,8 @@ When no concept is supplied, `prove` requests `integrity` and `existence`. TohuP
 The selected concept IDs are canonicalised and stored in the manifest. Changing selected concept IDs changes proof identity. Changing registry descriptions, display names, maturity wording, or legal text does not change proof identity.
 
 `records` is not part of the default concept set. To request Proof of Records, select `--concept records` and provide at least one strict JSON descriptor with `--record-json`. Supplying `--record-json` without selecting `records` is an input error.
+
+`custody` is not part of the default concept set. To request Proof of Custody, select `--concept custody` and provide at least one strict JSON descriptor with `--custody-json`. Supplying `--custody-json` without selecting `custody` is an input error.
 
 ## Proof of Records
 
@@ -128,6 +133,44 @@ Record descriptors use strict JSON:
 ```
 
 Record attributes are stored in the manifest. Do not place secrets, private keys, credentials, or unnecessarily sensitive information in record attributes.
+
+## Proof of Custody
+
+Proof of Custody makes a narrow packet-internal claim: the proof packet contains a canonical, hash-linked sequence of declared custody events bound to the recorded subject digest, and the retained sequence is internally consistent.
+
+It can verify that:
+
+- custody event envelopes are present;
+- event IDs use deterministic `cue_...` identifiers derived from canonical event bodies;
+- each event is bound to the packet subject digest;
+- each retained event links to the expected previous event hash;
+- the retained chain head matches the final event hash;
+- the custody claim references the retained event IDs and chain head exactly.
+
+It does not prove physical possession, actor identity, legal custody, ownership, authorship, authenticity, authority, consent, content truth, complete event history, absence of earlier or later events, independently witnessed transfer, external timestamp validity, immutability, legal validity, or legal admissibility.
+
+Custody descriptors use strict JSON:
+
+```json
+{
+  "schema_version": "tohupono.custody_descriptor.v1",
+  "event_type": "received",
+  "actor": {
+    "namespace": "local",
+    "identifier": "operator-1"
+  },
+  "occurred_at": null,
+  "location": null,
+  "reference": null,
+  "attributes": {}
+}
+```
+
+Allowed event types are `created`, `received`, `transferred`, `copied`, `verified`, `stored`, and `released`. Actor, location, reference, occurred-time, and attributes are declared metadata only. Declared `occurred_at` values use `YYYY-MM-DDTHH:MM:SSZ` when present and are not external timestamp evidence.
+
+For multiple custody events, descriptors must provide `occurred_at`; events are ordered by occurred time and then by canonical descriptor digest as a deterministic tiebreaker. A single event may omit `occurred_at`.
+
+Custody data is stored in the manifest. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
 
 ## Legacy Packets
 

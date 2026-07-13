@@ -152,6 +152,42 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
                     )
                 )
                 story.append(record_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "custody":
+                continue
+            events = result.get("events") if isinstance(result.get("events"), list) else []
+            rows = [["Seq", "Event ID", "Type", "Declared Actor", "Declared Time"]]
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+                actor_text = (
+                    f"{actor.get('namespace')}/{actor.get('identifier')}" if isinstance(actor, dict) else "unknown"
+                )
+                rows.append(
+                    [
+                        _safe(event.get("sequence")),
+                        _safe(event.get("event_id")),
+                        _safe(event.get("event_type")),
+                        _safe(actor_text),
+                        _safe(event.get("occurred_at") or "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Custody Details", styles["Heading3"]))
+                story.append(Paragraph(f"Chain head: {_safe(result.get('chain_head'))}", styles["Normal"]))
+                custody_table = Table(rows, colWidths=[35, 145, 70, 120, 110])
+                custody_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(custody_table)
     else:
         story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
     story.append(
@@ -165,6 +201,13 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         Paragraph(
             "Proof of Records verifies the packet's canonical record envelope and its link to the recorded subject. "
             "It does not independently establish that declared record metadata is true, authoritative, complete, or legally valid.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Custody verifies the retained packet's canonical custody-event sequence and internal hash links. "
+            "It does not independently prove physical possession, actor identity, legal custody, complete history, or that the declared events occurred.",
             styles["Normal"],
         )
     )

@@ -254,11 +254,16 @@ Current error codes include `MISSING_FILE`, `MISSING_PROOF`, `INVALID_JSONL`, `I
 
 ```bash
 python -m tohupono prove ./sample.txt --output proof_packet
+python -m tohupono prove ./sample.txt --concept custody --custody-json ./custody.json --output custody_packet
 python -m tohupono verify ./sample.txt --proof proof_packet/manifest.json --json
 python -m tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 python -m tohupono inspect-proof proof_packet/manifest.json --json
 python -m tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 ```
+
+Proof of Custody is an explicit Proof Concept, not a default. It stores canonical declared custody-event envelopes in the manifest and verifies their subject binding, event hashes, previous-event links, and retained chain head. It does not prove physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, or legal admissibility.
+
+Custody descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
 
 Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
 

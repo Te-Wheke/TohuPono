@@ -8,6 +8,10 @@ from typing import Any
 from tohupono.concepts.registry import concept_registry, get_concept
 from tohupono.core.canonical_json import canonical_json_bytes
 from tohupono.core.file_identity import inspect_file
+from tohupono.custody.validation import (
+    CUSTODY_COLLECTION_SCHEMA_VERSION,
+    validate_manifest_custody,
+)
 from tohupono.records.validation import (
     RECORDS_COLLECTION_SCHEMA_VERSION,
     validate_manifest_records,
@@ -17,7 +21,7 @@ from tohupono.timestamping.model import DEFAULT_TIMESTAMP_POLICY
 
 PROOF_CONCEPTS_SCHEMA_VERSION = "tohupono.proof_concepts.v1"
 DEFAULT_EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
-EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity", "records")
+EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "records")
 CONCEPT_RESULT_STATUSES: tuple[str, ...] = ("PASS", "WARN", "FAIL", "UNPROVEN")
 _CONCEPT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BIDI_CONTROLS = {
@@ -131,10 +135,27 @@ def _record_ids_from_manifest_records(records: dict[str, object] | None) -> list
     )
 
 
+def _custody_claim_parameters(custody: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(custody, dict):
+        return {"chain_head": None, "custody_schema_version": CUSTODY_COLLECTION_SCHEMA_VERSION, "event_ids": []}
+    events = custody.get("events")
+    event_ids = [
+        str(item["event_id"])
+        for item in events
+        if isinstance(item, dict) and isinstance(item.get("event_id"), str)
+    ] if isinstance(events, list) else []
+    return {
+        "chain_head": custody.get("chain_head") if isinstance(custody.get("chain_head"), str) else None,
+        "custody_schema_version": CUSTODY_COLLECTION_SCHEMA_VERSION,
+        "event_ids": event_ids,
+    }
+
+
 def build_proof_concepts_declaration(
     file_sha256: str,
     concept_ids: tuple[str, ...],
     records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
 ) -> dict[str, object]:
     claims: list[dict[str, object]] = []
     for concept_id in concept_ids:
@@ -142,6 +163,8 @@ def build_proof_concepts_declaration(
         parameters: dict[str, object] = {}
         if concept_id == "existence":
             parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
+        elif concept_id == "custody":
+            parameters = _custody_claim_parameters(custody)
         elif concept_id == "records":
             parameters = {
                 "record_ids": _record_ids_from_manifest_records(records),
@@ -211,6 +234,8 @@ def _expected_claim(concept_id: str, file_sha256: str, manifest: dict[str, Any])
     parameters: dict[str, object] = {}
     if concept_id == "existence":
         parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
+    elif concept_id == "custody":
+        parameters = _custody_claim_parameters(manifest.get("custody") if isinstance(manifest.get("custody"), dict) else None)
     elif concept_id == "records":
         parameters = {
             "record_ids": _record_ids_from_manifest_records(
@@ -260,6 +285,11 @@ def _validate_claim(
         parameters = claim.get("parameters")
         if not isinstance(parameters, dict):
             raise ValueError("Proof of Records claim parameters must be an object.")
+        expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
+    elif concept_id == "custody":
+        parameters = claim.get("parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("Proof of Custody claim parameters must be an object.")
         expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
     else:
         if claim.get("parameters") != expected["parameters"]:
@@ -487,6 +517,62 @@ def evaluate_records(
     return result
 
 
+def evaluate_custody(
+    manifest: dict[str, Any],
+    *,
+    claim_id: str | None,
+    expected_event_ids: list[str],
+    expected_chain_head: str | None,
+) -> dict[str, object]:
+    validation = validate_manifest_custody(
+        manifest,
+        expected_event_ids=expected_event_ids,
+        expected_chain_head=expected_chain_head,
+    )
+    checks: list[dict[str, str]] = []
+    for failure in validation.failures:
+        checks.append({"status": "FAIL", "message": failure})
+    for warning in validation.warnings:
+        checks.append({"status": "WARN", "message": warning})
+    if validation.status == "pass":
+        checks.insert(0, {"status": "PASS", "message": "custody event sequence is canonical and hash-linked."})
+    status = "PASS" if validation.status == "pass" else "FAIL"
+    evidence_summary = (
+        f"Custody event count {validation.event_count}; chain head {validation.chain_head or 'none'}."
+    )
+    result = _result(
+        concept_id="custody",
+        status=status,
+        claim_id=claim_id,
+        checks=checks,
+        limitations=validation.limitations,
+        evidence_summary=evidence_summary,
+    )
+    result["custody_schema_status"] = validation.custody_schema_status
+    result["event_count"] = validation.event_count
+    result["chain_head"] = validation.chain_head
+    result["event_ids"] = validation.event_ids
+    result["events"] = [
+        {
+            "actor": event.get("actor"),
+            "attribute_count": len(event.get("attributes", {})) if isinstance(event.get("attributes"), dict) else 0,
+            "event_hash": event.get("event_hash"),
+            "event_id": event.get("event_id"),
+            "event_type": event.get("event_type"),
+            "location_present": event.get("location") is not None,
+            "occurred_at": event.get("occurred_at"),
+            "previous_event_hash": event.get("previous_event_hash"),
+            "reference": event.get("reference"),
+            "sequence": event.get("sequence"),
+            "subject": event.get("subject"),
+        }
+        for event in validation.events
+    ]
+    result["failures"] = validation.failures
+    result["warnings"] = validation.warnings
+    return result
+
+
 def evaluate_declared_concepts(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -519,6 +605,22 @@ def evaluate_declared_concepts(
         claim_id = str(claim.get("claim_id")) if claim.get("claim_id") else None
         if concept_id == "integrity":
             results.append(evaluate_integrity(manifest, source_path=source_path, claim_id=claim_id))
+        elif concept_id == "custody":
+            parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}
+            raw_event_ids = parameters.get("event_ids") if isinstance(parameters, dict) else []
+            if parameters.get("custody_schema_version") != CUSTODY_COLLECTION_SCHEMA_VERSION:
+                expected_event_ids = ["__invalid_custody_schema__"]
+            else:
+                expected_event_ids = [str(item) for item in raw_event_ids] if isinstance(raw_event_ids, list) else []
+            chain_head = parameters.get("chain_head") if isinstance(parameters.get("chain_head"), str) else "__invalid_custody_chain_head__"
+            results.append(
+                evaluate_custody(
+                    manifest,
+                    claim_id=claim_id,
+                    expected_event_ids=expected_event_ids,
+                    expected_chain_head=chain_head,
+                )
+            )
         elif concept_id == "existence":
             results.append(
                 evaluate_existence(manifest_path, manifest, claim_id=claim_id, timestamp_policy=timestamp_policy)

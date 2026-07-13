@@ -17,6 +17,7 @@ from tohupono.concepts.execution import (
 )
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
+from tohupono.custody.validation import build_custody_chain, load_custody_descriptor
 from tohupono.records.model import RecordEnvelope
 from tohupono.records.validation import (
     build_record_collection,
@@ -69,6 +70,7 @@ class ProofManifest:
     claims: list[dict[str, object]]
     proof_concepts: dict[str, object]
     records: dict[str, object] | None
+    custody: dict[str, object] | None
     evidence: dict[str, list[dict[str, object]]]
     timestamping: dict[str, object]
     trust_policy: dict[str, str]
@@ -89,6 +91,7 @@ def proof_id_seed(
     sealed_at_utc: str,
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
 ) -> dict[str, object]:
     concepts = validate_requested_concepts(list(concept_ids)) if concept_ids is not None else ()
     seed = {
@@ -106,6 +109,19 @@ def proof_id_seed(
             "record_ids": record_ids_from_collection(records),
             "schema_version": records.get("schema_version"),
         }
+    if custody is not None:
+        events = custody.get("events") if isinstance(custody, dict) else None
+        seed["custody"] = {
+            "chain_head": custody.get("chain_head") if isinstance(custody, dict) else None,
+            "event_ids": [
+                str(item["event_id"])
+                for item in events
+                if isinstance(events, list) and isinstance(item, dict) and isinstance(item.get("event_id"), str)
+            ]
+            if isinstance(events, list)
+            else [],
+            "schema_version": custody.get("schema_version") if isinstance(custody, dict) else None,
+        }
     return seed
 
 
@@ -114,8 +130,11 @@ def make_proof_id(
     sealed_at_utc: str,
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
 ) -> str:
-    digest = hashlib.sha256(canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records))).hexdigest()
+    digest = hashlib.sha256(
+        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody))
+    ).hexdigest()
     return f"tp_{digest[:32]}"
 
 
@@ -239,12 +258,13 @@ def build_manifest(
     sealed_at_utc: str,
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
 ) -> ProofManifest:
     selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
     warnings: list[str] = []
     if identity.blake3 is None:
         warnings.append("BLAKE3 unavailable; optional BLAKE3 digest was not recorded.")
-    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records)
+    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody)
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
@@ -262,8 +282,9 @@ def build_manifest(
                 "evidence_refs": [],
             }
         ],
-        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records),
+        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody),
         records=records,
+        custody=custody,
         evidence={
             "hashes": [],
             "timestamps": [],
@@ -353,6 +374,7 @@ def create_proof_packet(
     sealed_at_utc: str | None = None,
     concept_ids: list[str] | tuple[str, ...] | None = None,
     record_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    custody_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
 ) -> ProofManifest:
     identity = inspect_file(source)
     sealed_at = sealed_at_utc or utc_now_iso()
@@ -362,6 +384,11 @@ def create_proof_packet(
         raise ValueError("Proof of Records requires at least one --record-json descriptor.")
     if record_paths and "records" not in selected_concepts:
         raise ValueError("--record-json requires selecting --concept records.")
+    custody_paths = list(custody_descriptor_paths or [])
+    if "custody" in selected_concepts and not custody_paths:
+        raise ValueError("Proof of Custody requires at least one --custody-json descriptor.")
+    if custody_paths and "custody" not in selected_concepts:
+        raise ValueError("--custody-json requires selecting --concept custody.")
     record_collection: dict[str, object] | None = None
     if record_paths:
         envelopes: list[RecordEnvelope] = []
@@ -375,7 +402,15 @@ def create_proof_packet(
                 )
             )
         record_collection = build_record_collection(envelopes)
-    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection)
+    custody_collection: dict[str, object] | None = None
+    if custody_paths:
+        descriptors = [load_custody_descriptor(descriptor_path) for descriptor_path in custody_paths]
+        custody_collection = build_custody_chain(
+            descriptors,
+            subject_algorithm="sha256",
+            subject_digest=identity.sha256,
+        )
+    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection)
     _assert_can_create_packet(output)
     output.mkdir(parents=True, exist_ok=True)
 
@@ -383,6 +418,8 @@ def create_proof_packet(
     manifest_dict = manifest.to_dict()
     if manifest_dict.get("records") is None:
         manifest_dict.pop("records", None)
+    if manifest_dict.get("custody") is None:
+        manifest_dict.pop("custody", None)
     manifest_dict["timestamping"] = local_timestamp_proof(identity.sha256, sealed_at).to_dict()
     sealed_event = build_evidence_event(
         event_type="sealed",

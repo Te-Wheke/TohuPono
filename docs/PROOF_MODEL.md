@@ -41,8 +41,9 @@ The first executable Proof Concepts are:
 - `integrity`;
 - `existence`;
 - `records`.
+- `custody`.
 
-Registered concepts such as `authenticity`, `ownership`, `lineage`, and `reality` are not made executable merely by appearing in the registry.
+Registered concepts such as `authenticity`, `ownership`, and `reality` are not made executable merely by appearing in the registry.
 
 New proof manifests include a top-level `proof_concepts` declaration:
 
@@ -84,6 +85,42 @@ Proof of Records is explicit and descriptor-driven. It is not included in the de
 
 The `records` Proof Concept claim references every stored record ID exactly once. Verification fails if stored records and claimed record IDs diverge, if a record ID does not recompute, or if a record subject digest does not match the packet subject digest.
 
+Proof of Custody is explicit and descriptor-driven. It is not included in the default concept set. A custody proof requires `--concept custody` and at least one `--custody-json` descriptor. New custody packets include a top-level `custody` section:
+
+```json
+{
+  "schema_version": "tohupono.custody.v1",
+  "event_count": 1,
+  "chain_head": "...",
+  "events": [
+    {
+      "event_id": "cue_...",
+      "event_hash": "...",
+      "schema_version": "tohupono.custody_event.v1",
+      "event_type": "received",
+      "subject": {
+        "algorithm": "sha256",
+        "digest": "..."
+      },
+      "actor": {
+        "namespace": "local",
+        "identifier": "operator-1"
+      },
+      "occurred_at": null,
+      "location": null,
+      "reference": null,
+      "attributes": {},
+      "sequence": 1,
+      "previous_event_hash": "GENESIS"
+    }
+  ]
+}
+```
+
+`event_hash` is SHA-256 over the canonical event body excluding `event_hash` and `event_id`; `event_id` is `cue_` plus the first 32 hexadecimal characters of that hash. Sequence values are contiguous, the first previous hash is `GENESIS`, later previous hashes match the prior retained event, and the chain head is the final retained event hash. This is tamper-evident for the retained sequence, not immutable and not proof of complete real-world history.
+
+The `custody` Proof Concept claim references event IDs in retained sequence order and the stored chain head. Verification fails if the claim and stored custody section diverge.
+
 Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
 
 Initial maturity assignments:
@@ -91,6 +128,7 @@ Initial maturity assignments:
 - `integrity`: `locally_supported`;
 - `existence`: `locally_supported`, limited to local timestamp and imported-receipt handling;
 - `records`: `locally_supported`, limited to canonical packet-internal record envelopes and subject-digest linkage;
+- `custody`: `locally_supported`, limited to canonical packet-internal custody-event envelopes and retained hash-link consistency;
 - `lineage`: `locally_supported`, limited to recorded relationships;
 - `authenticity`: `modelled`;
 - `ownership`: `modelled`;

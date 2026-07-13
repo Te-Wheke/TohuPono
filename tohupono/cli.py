@@ -24,6 +24,7 @@ from tohupono.core.proof import (
     resolve_packet_manifest,
     timestamp_verification_diagnostics,
 )
+from tohupono.custody.validation import load_custody_descriptor, validate_manifest_custody
 from tohupono.reporting.pro_report import generate_report
 from tohupono.records.validation import load_record_descriptor, validate_manifest_records
 from tohupono.timestamping.model import (
@@ -189,6 +190,30 @@ def _print_packet_checks(result: dict[str, object]) -> None:
                     print(f"  FAIL: {failure}")
                 for limitation in item.get("limitations") or []:
                     print(f"  LIMIT: {limitation}")
+            if item.get("concept_id") == "custody":
+                print(f"  custody events: {item.get('event_count', 0)}")
+                print(f"  chain head: {item.get('chain_head') or 'none'}")
+                for event in item.get("events") or []:
+                    if not isinstance(event, dict):
+                        continue
+                    actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+                    actor_text = (
+                        f"{actor.get('namespace')}/{actor.get('identifier')}"
+                        if isinstance(actor, dict)
+                        else "unknown"
+                    )
+                    print(
+                        "  - "
+                        f"seq={event.get('sequence')} "
+                        f"{event.get('event_id')} "
+                        f"type={event.get('event_type')} "
+                        f"actor={actor_text} "
+                        f"declared_time={event.get('occurred_at') or 'none'}"
+                    )
+                for failure in item.get("failures") or []:
+                    print(f"  FAIL: {failure}")
+                for limitation in item.get("limitations") or []:
+                    print(f"  LIMIT: {limitation}")
 
 
 def _print_concept_list_human(records: list[dict[str, object]]) -> None:
@@ -259,6 +284,85 @@ def _record_inspection(packet: Path) -> dict[str, object]:
         "status": validation.status,
         "warnings": validation.warnings,
     }
+
+
+def _custody_validation_summary(path: Path) -> dict[str, object]:
+    descriptor = load_custody_descriptor(path)
+    attributes = descriptor.attributes
+    return {
+        "actor_identifier": descriptor.actor["identifier"],
+        "actor_namespace": descriptor.actor["namespace"],
+        "attribute_count": len(attributes),
+        "declared_time_present": descriptor.occurred_at is not None,
+        "descriptor_schema_version": descriptor.schema_version,
+        "event_type": descriptor.event_type,
+        "failures": [],
+        "location_present": descriptor.location is not None,
+        "reference_present": descriptor.reference is not None,
+        "status": "ok",
+        "warnings": [
+            "Descriptor validation does not prove that a custody event occurred or that an actor identity is verified.",
+            "Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.",
+        ],
+    }
+
+
+def _custody_inspection(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    validation = validate_manifest_custody(manifest)
+    return {
+        "chain_head": validation.chain_head,
+        "custody_schema_status": validation.custody_schema_status,
+        "event_count": validation.event_count,
+        "event_ids": validation.event_ids,
+        "events": validation.events,
+        "failures": validation.failures,
+        "limitations": validation.limitations,
+        "manifest": str(manifest_path),
+        "status": validation.status,
+        "warnings": validation.warnings,
+    }
+
+
+def _print_custody_validate_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Descriptor schema: {result.get('descriptor_schema_version')}")
+    print(f"Event type: {result.get('event_type')}")
+    print(f"Actor namespace: {result.get('actor_namespace')}")
+    print(f"Actor identifier: {result.get('actor_identifier')}")
+    print(f"Declared time present: {'yes' if result.get('declared_time_present') else 'no'}")
+    print(f"Location present: {'yes' if result.get('location_present') else 'no'}")
+    print(f"Reference present: {'yes' if result.get('reference_present') else 'no'}")
+    print(f"Attribute count: {result.get('attribute_count')}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+
+
+def _print_custody_inspect_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Custody schema: {result.get('custody_schema_status')}")
+    print(f"Event count: {result.get('event_count')}")
+    print(f"Chain head: {result.get('chain_head') or 'none'}")
+    for event in result.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+        attributes = event.get("attributes") if isinstance(event.get("attributes"), dict) else {}
+        print(f"Event sequence: {event.get('sequence')}")
+        print(f"Event ID: {event.get('event_id')}")
+        print(f"Event type: {event.get('event_type')}")
+        print(f"Declared actor: {actor.get('namespace')}/{actor.get('identifier')}" if isinstance(actor, dict) else "Declared actor: unknown")
+        print(f"Declared time: {event.get('occurred_at') or 'none'}")
+        print(f"Previous hash: {event.get('previous_event_hash')}")
+        print(f"Event hash: {event.get('event_hash')}")
+        print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
+    for failure in result.get("failures", []):
+        print(f"FAIL: {failure}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+    for limitation in result.get("limitations", []):
+        print(f"LIMIT: {limitation}")
 
 
 def _print_record_validate_human(result: dict[str, object]) -> None:
@@ -478,6 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("--include-payload", action="store_true")
     prove_cmd.add_argument("--concept", action="append", dest="concepts")
     prove_cmd.add_argument("--record-json", action="append", dest="record_json")
+    prove_cmd.add_argument("--custody-json", action="append", dest="custody_json")
 
     concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
     concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
@@ -495,6 +600,15 @@ def build_parser() -> argparse.ArgumentParser:
     record_inspect_cmd = record_sub.add_parser("inspect", help="Inspect records stored in a proof packet.")
     record_inspect_cmd.add_argument("packet")
     record_inspect_cmd.add_argument("--json", action="store_true")
+
+    custody_cmd = sub.add_parser("custody", help="Validate and inspect Proof of Custody metadata.")
+    custody_sub = custody_cmd.add_subparsers(dest="custody_command", required=True)
+    custody_validate_cmd = custody_sub.add_parser("validate", help="Validate a custody descriptor JSON file.")
+    custody_validate_cmd.add_argument("descriptor")
+    custody_validate_cmd.add_argument("--json", action="store_true")
+    custody_inspect_cmd = custody_sub.add_parser("inspect", help="Inspect custody events stored in a proof packet.")
+    custody_inspect_cmd.add_argument("packet")
+    custody_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -615,6 +729,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 args.include_payload,
                 concept_ids=args.concepts,
                 record_descriptor_paths=[Path(item) for item in (args.record_json or [])],
+                custody_descriptor_paths=[Path(item) for item in (args.custody_json or [])],
             )
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
@@ -650,6 +765,22 @@ def run(argv: Sequence[str] | None = None) -> int:
                     _print_record_inspect_human(result)
                 return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
             parser.error("Unknown record command")
+        elif args.command == "custody":
+            if args.custody_command == "validate":
+                result = _custody_validation_summary(Path(args.descriptor))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_custody_validate_human(result)
+                return EXIT_SUCCESS
+            if args.custody_command == "inspect":
+                result = _custody_inspection(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_custody_inspect_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown custody command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))
