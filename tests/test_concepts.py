@@ -23,6 +23,7 @@ def test_concept_list_json_is_deterministic_and_sorted() -> None:
     assert executable["custody"] is True
     assert executable["integrity"] is True
     assert executable["existence"] is True
+    assert executable["provenance"] is True
     assert executable["records"] is True
     assert executable["authenticity"] is False
 

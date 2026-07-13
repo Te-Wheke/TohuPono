@@ -12,6 +12,11 @@ from tohupono.custody.validation import (
     CUSTODY_COLLECTION_SCHEMA_VERSION,
     validate_manifest_custody,
 )
+from tohupono.provenance.validation import (
+    PROVENANCE_COLLECTION_SCHEMA_VERSION,
+    provenance_edge_ids_from_collection,
+    validate_manifest_provenance,
+)
 from tohupono.records.validation import (
     RECORDS_COLLECTION_SCHEMA_VERSION,
     validate_manifest_records,
@@ -21,7 +26,7 @@ from tohupono.timestamping.model import DEFAULT_TIMESTAMP_POLICY
 
 PROOF_CONCEPTS_SCHEMA_VERSION = "tohupono.proof_concepts.v1"
 DEFAULT_EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
-EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "records")
+EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "provenance", "records")
 CONCEPT_RESULT_STATUSES: tuple[str, ...] = ("PASS", "WARN", "FAIL", "UNPROVEN")
 _CONCEPT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BIDI_CONTROLS = {
@@ -151,11 +156,20 @@ def _custody_claim_parameters(custody: dict[str, object] | None) -> dict[str, ob
     }
 
 
+def _provenance_claim_parameters(file_sha256: str, provenance: dict[str, object] | None) -> dict[str, object]:
+    return {
+        "child": {"algorithm": "sha256", "digest": file_sha256},
+        "edge_ids": provenance_edge_ids_from_collection(provenance),
+        "provenance_schema_version": PROVENANCE_COLLECTION_SCHEMA_VERSION,
+    }
+
+
 def build_proof_concepts_declaration(
     file_sha256: str,
     concept_ids: tuple[str, ...],
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
+    provenance: dict[str, object] | None = None,
 ) -> dict[str, object]:
     claims: list[dict[str, object]] = []
     for concept_id in concept_ids:
@@ -165,6 +179,8 @@ def build_proof_concepts_declaration(
             parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
         elif concept_id == "custody":
             parameters = _custody_claim_parameters(custody)
+        elif concept_id == "provenance":
+            parameters = _provenance_claim_parameters(file_sha256, provenance)
         elif concept_id == "records":
             parameters = {
                 "record_ids": _record_ids_from_manifest_records(records),
@@ -236,6 +252,8 @@ def _expected_claim(concept_id: str, file_sha256: str, manifest: dict[str, Any])
         parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
     elif concept_id == "custody":
         parameters = _custody_claim_parameters(manifest.get("custody") if isinstance(manifest.get("custody"), dict) else None)
+    elif concept_id == "provenance":
+        parameters = _provenance_claim_parameters(file_sha256, manifest.get("provenance") if isinstance(manifest.get("provenance"), dict) else None)
     elif concept_id == "records":
         parameters = {
             "record_ids": _record_ids_from_manifest_records(
@@ -290,6 +308,11 @@ def _validate_claim(
         parameters = claim.get("parameters")
         if not isinstance(parameters, dict):
             raise ValueError("Proof of Custody claim parameters must be an object.")
+        expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
+    elif concept_id == "provenance":
+        parameters = claim.get("parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("Proof of Provenance claim parameters must be an object.")
         expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
     else:
         if claim.get("parameters") != expected["parameters"]:
@@ -573,6 +596,59 @@ def evaluate_custody(
     return result
 
 
+def evaluate_provenance(
+    manifest: dict[str, Any],
+    *,
+    claim_id: str | None,
+    expected_edge_ids: list[str],
+    expected_child: dict[str, object] | None,
+) -> dict[str, object]:
+    validation = validate_manifest_provenance(
+        manifest,
+        expected_edge_ids=expected_edge_ids,
+        expected_child=expected_child,
+    )
+    checks: list[dict[str, str]] = []
+    for failure in validation.failures:
+        checks.append({"status": "FAIL", "message": failure})
+    for warning in validation.warnings:
+        checks.append({"status": "WARN", "message": warning})
+    if validation.status == "pass":
+        checks.insert(0, {"status": "PASS", "message": "provenance edges are canonical and linked to the subject digest."})
+    status = "PASS" if validation.status == "pass" else "FAIL"
+    evidence_summary = (
+        f"Provenance edge count {validation.edge_count}; edge IDs {', '.join(validation.edge_ids) if validation.edge_ids else 'none'}."
+    )
+    result = _result(
+        concept_id="provenance",
+        status=status,
+        claim_id=claim_id,
+        checks=checks,
+        limitations=validation.limitations,
+        evidence_summary=evidence_summary,
+    )
+    result["provenance_schema_status"] = validation.provenance_schema_status
+    result["edge_count"] = validation.edge_count
+    result["edge_ids"] = validation.edge_ids
+    result["edges"] = [
+        {
+            "actor": edge.get("actor"),
+            "attribute_count": len(edge.get("attributes", {})) if isinstance(edge.get("attributes"), dict) else 0,
+            "child": edge.get("child"),
+            "edge_id": edge.get("edge_id"),
+            "operation": edge.get("operation"),
+            "occurred_at": edge.get("occurred_at"),
+            "parent": edge.get("parent"),
+            "reference": edge.get("reference"),
+            "relation_type": edge.get("relation_type"),
+        }
+        for edge in validation.edges
+    ]
+    result["failures"] = validation.failures
+    result["warnings"] = validation.warnings
+    return result
+
+
 def evaluate_declared_concepts(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -624,6 +700,22 @@ def evaluate_declared_concepts(
         elif concept_id == "existence":
             results.append(
                 evaluate_existence(manifest_path, manifest, claim_id=claim_id, timestamp_policy=timestamp_policy)
+            )
+        elif concept_id == "provenance":
+            parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}
+            raw_edge_ids = parameters.get("edge_ids") if isinstance(parameters, dict) else []
+            if parameters.get("provenance_schema_version") != PROVENANCE_COLLECTION_SCHEMA_VERSION:
+                expected_edge_ids = ["__invalid_provenance_schema__"]
+            else:
+                expected_edge_ids = [str(item) for item in raw_edge_ids] if isinstance(raw_edge_ids, list) else []
+            child = parameters.get("child") if isinstance(parameters.get("child"), dict) else {"algorithm": "sha256", "digest": "__invalid_provenance_child__"}
+            results.append(
+                evaluate_provenance(
+                    manifest,
+                    claim_id=claim_id,
+                    expected_edge_ids=expected_edge_ids,
+                    expected_child=child,
+                )
             )
         elif concept_id == "records":
             parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}

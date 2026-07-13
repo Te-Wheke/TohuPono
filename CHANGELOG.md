@@ -18,6 +18,10 @@
 - Added repeatable `prove --custody-json` for explicit `--concept custody` proofs.
 - Added `tohupono custody validate` and `tohupono custody inspect` for descriptor validation and packet custody inspection.
 - Added audit and report integration for Proof of Custody without asserting physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, or legal admissibility.
+- Added executable Proof of Provenance support through strict JSON provenance descriptors, canonical lineage edge envelopes, deterministic `prv_...` edge IDs, child/parent digest binding, and provenance claim linkage.
+- Added repeatable `prove --provenance-json` for explicit `--concept provenance` proofs.
+- Added `tohupono provenance validate` and `tohupono provenance inspect` for descriptor validation and packet provenance inspection.
+- Added audit and report integration for Proof of Provenance without asserting parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
 - Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
 - Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
 - Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.

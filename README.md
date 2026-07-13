@@ -97,12 +97,13 @@ Current v0.5.0 development introduces a conservative Proof Concepts registry. In
 - `integrity`: locally supported through byte digests and packet checks.
 - `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
 - `records`: locally supported for canonical record envelopes and subject-digest linkage, but not metadata truth, authority, ownership, identity, authorship, authenticity, legal validity, or external record-management requirements.
+- `provenance`: locally supported for canonical declared lineage edges and child/parent digest linkage, but not parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
 - `lineage`: locally supported for recorded relationships only; completeness of history is not proven.
 - `authenticity`: modelled, not established by digest or signature checks alone.
 - `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
 - `reality`: modelled as a long-term layered assessment only.
 
-The current executable Proof Concepts are `integrity`, `existence`, and `records`.
+The current executable Proof Concepts are `integrity`, `existence`, `records`, `custody`, and `provenance`.
 
 ```bash
 python -m tohupono concept list
@@ -110,6 +111,7 @@ python -m tohupono concept list --json
 python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
+python -m tohupono concept inspect provenance --json
 ```
 
 `prove` accepts repeatable `--concept` options. When no concept is supplied, the default executable concept set is `integrity` and `existence`.
@@ -118,6 +120,7 @@ python -m tohupono concept inspect records --json
 python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
+python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
 ```
 
 Concept selection is part of the deterministic proof identity. The selected concept IDs are canonicalised before hashing, so command-line ordering does not change identity. Registry prose, display names, maturity wording, roadmap text, and legal commentary are not included in deterministic claim bodies.
@@ -264,6 +267,10 @@ python -m tohupono report --proof proof_packet/manifest.json --format pdf --outp
 Proof of Custody is an explicit Proof Concept, not a default. It stores canonical declared custody-event envelopes in the manifest and verifies their subject binding, event hashes, previous-event links, and retained chain head. It does not prove physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, or legal admissibility.
 
 Custody descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
+
+Proof of Provenance is an explicit Proof Concept, not a default. It stores canonical declared lineage edge envelopes in the manifest and verifies child digest binding, parent digest structure, edge identifiers, deterministic ordering, and claim linkage. It does not prove that parent files exist, that declared transformations occurred, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
+
+Provenance descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.
 
 Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
 

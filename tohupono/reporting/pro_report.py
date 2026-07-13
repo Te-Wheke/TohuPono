@@ -188,6 +188,38 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
                     )
                 )
                 story.append(custody_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "provenance":
+                continue
+            edges = result.get("edges") if isinstance(result.get("edges"), list) else []
+            rows = [["Edge ID", "Relation", "Parent Digest", "Operation"]]
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                parent = edge.get("parent") if isinstance(edge.get("parent"), dict) else {}
+                operation = edge.get("operation") if isinstance(edge.get("operation"), dict) else None
+                rows.append(
+                    [
+                        _safe(edge.get("edge_id")),
+                        _safe(edge.get("relation_type")),
+                        _safe(parent.get("digest") if isinstance(parent, dict) else "unknown"),
+                        _safe(operation.get("name") if isinstance(operation, dict) else "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Provenance Details", styles["Heading3"]))
+                provenance_table = Table(rows, colWidths=[145, 90, 180, 65])
+                provenance_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(provenance_table)
     else:
         story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
     story.append(
@@ -208,6 +240,13 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         Paragraph(
             "Proof of Custody verifies the retained packet's canonical custody-event sequence and internal hash links. "
             "It does not independently prove physical possession, actor identity, legal custody, complete history, or that the declared events occurred.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Provenance verifies canonical declared lineage relationships retained in the packet. "
+            "It does not independently prove that parent files exist, that declared transformations occurred, or that lineage is complete, authentic, or authoritative.",
             styles["Normal"],
         )
     )

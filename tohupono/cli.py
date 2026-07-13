@@ -26,6 +26,7 @@ from tohupono.core.proof import (
 )
 from tohupono.custody.validation import load_custody_descriptor, validate_manifest_custody
 from tohupono.reporting.pro_report import generate_report
+from tohupono.provenance.validation import load_provenance_descriptor, validate_manifest_provenance
 from tohupono.records.validation import load_record_descriptor, validate_manifest_records
 from tohupono.timestamping.model import (
     DEFAULT_TIMESTAMP_POLICY,
@@ -214,6 +215,22 @@ def _print_packet_checks(result: dict[str, object]) -> None:
                     print(f"  FAIL: {failure}")
                 for limitation in item.get("limitations") or []:
                     print(f"  LIMIT: {limitation}")
+            if item.get("concept_id") == "provenance":
+                print(f"  provenance edges: {item.get('edge_count', 0)}")
+                for edge in item.get("edges") or []:
+                    if not isinstance(edge, dict):
+                        continue
+                    parent = edge.get("parent") if isinstance(edge.get("parent"), dict) else {}
+                    print(
+                        "  - "
+                        f"{edge.get('edge_id')} "
+                        f"relation={edge.get('relation_type')} "
+                        f"parent={parent.get('digest') if isinstance(parent, dict) else 'unknown'}"
+                    )
+                for failure in item.get("failures") or []:
+                    print(f"  FAIL: {failure}")
+                for limitation in item.get("limitations") or []:
+                    print(f"  LIMIT: {limitation}")
 
 
 def _print_concept_list_human(records: list[dict[str, object]]) -> None:
@@ -250,6 +267,88 @@ def _print_concept_inspect_human(record: dict[str, object]) -> None:
     for item in record.get("privacy_implications", []):
         print(f"- {item}")
     print(f"Legal boundary: {record['legal_boundary']}")
+
+
+def _provenance_validation_summary(path: Path) -> dict[str, object]:
+    descriptor = load_provenance_descriptor(path)
+    attributes = descriptor.attributes
+    return {
+        "actor_present": descriptor.actor is not None,
+        "attribute_count": len(attributes),
+        "declared_time_present": descriptor.occurred_at is not None,
+        "descriptor_schema_version": descriptor.schema_version,
+        "failures": [],
+        "operation_present": descriptor.operation is not None,
+        "parent_algorithm": descriptor.parent["algorithm"],
+        "parent_digest_valid": True,
+        "reference_present": descriptor.reference is not None,
+        "relation_type": descriptor.relation_type,
+        "status": "ok",
+        "warnings": [
+            "Descriptor validation does not prove that the parent file exists or that a lineage relationship occurred.",
+            "Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.",
+        ],
+    }
+
+
+def _provenance_inspection(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    validation = validate_manifest_provenance(manifest)
+    return {
+        "edge_count": validation.edge_count,
+        "edge_ids": validation.edge_ids,
+        "edges": validation.edges,
+        "failures": validation.failures,
+        "limitations": validation.limitations,
+        "manifest": str(manifest_path),
+        "provenance_schema_status": validation.provenance_schema_status,
+        "status": validation.status,
+        "warnings": validation.warnings,
+    }
+
+
+def _print_provenance_validate_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Descriptor schema: {result.get('descriptor_schema_version')}")
+    print(f"Relation type: {result.get('relation_type')}")
+    print(f"Parent algorithm: {result.get('parent_algorithm')}")
+    print(f"Parent digest valid: {'yes' if result.get('parent_digest_valid') else 'no'}")
+    print(f"Operation present: {'yes' if result.get('operation_present') else 'no'}")
+    print(f"Actor present: {'yes' if result.get('actor_present') else 'no'}")
+    print(f"Declared time present: {'yes' if result.get('declared_time_present') else 'no'}")
+    print(f"Reference present: {'yes' if result.get('reference_present') else 'no'}")
+    print(f"Attribute count: {result.get('attribute_count')}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+
+
+def _print_provenance_inspect_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Provenance schema: {result.get('provenance_schema_status')}")
+    print(f"Edge count: {result.get('edge_count')}")
+    for edge in result.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        child = edge.get("child") if isinstance(edge.get("child"), dict) else {}
+        parent = edge.get("parent") if isinstance(edge.get("parent"), dict) else {}
+        operation = edge.get("operation") if isinstance(edge.get("operation"), dict) else None
+        actor = edge.get("actor") if isinstance(edge.get("actor"), dict) else None
+        attributes = edge.get("attributes") if isinstance(edge.get("attributes"), dict) else {}
+        print(f"Edge ID: {edge.get('edge_id')}")
+        print(f"Relation type: {edge.get('relation_type')}")
+        print(f"Child digest: {child.get('digest') if isinstance(child, dict) else 'unknown'}")
+        print(f"Parent digest: {parent.get('digest') if isinstance(parent, dict) else 'unknown'}")
+        print(f"Operation: {operation.get('name') if isinstance(operation, dict) else 'none'}")
+        print(f"Declared actor: {actor.get('namespace') + '/' + actor.get('identifier') if isinstance(actor, dict) else 'none'}")
+        print(f"Declared time: {edge.get('occurred_at') or 'none'}")
+        print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
+    for failure in result.get("failures", []):
+        print(f"FAIL: {failure}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+    for limitation in result.get("limitations", []):
+        print(f"LIMIT: {limitation}")
 
 
 def _record_validation_summary(path: Path) -> dict[str, object]:
@@ -583,6 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("--concept", action="append", dest="concepts")
     prove_cmd.add_argument("--record-json", action="append", dest="record_json")
     prove_cmd.add_argument("--custody-json", action="append", dest="custody_json")
+    prove_cmd.add_argument("--provenance-json", action="append", dest="provenance_json")
 
     concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
     concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
@@ -609,6 +709,15 @@ def build_parser() -> argparse.ArgumentParser:
     custody_inspect_cmd = custody_sub.add_parser("inspect", help="Inspect custody events stored in a proof packet.")
     custody_inspect_cmd.add_argument("packet")
     custody_inspect_cmd.add_argument("--json", action="store_true")
+
+    provenance_cmd = sub.add_parser("provenance", help="Validate and inspect Proof of Provenance metadata.")
+    provenance_sub = provenance_cmd.add_subparsers(dest="provenance_command", required=True)
+    provenance_validate_cmd = provenance_sub.add_parser("validate", help="Validate a provenance descriptor JSON file.")
+    provenance_validate_cmd.add_argument("descriptor")
+    provenance_validate_cmd.add_argument("--json", action="store_true")
+    provenance_inspect_cmd = provenance_sub.add_parser("inspect", help="Inspect provenance edges stored in a proof packet.")
+    provenance_inspect_cmd.add_argument("packet")
+    provenance_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -730,6 +839,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 concept_ids=args.concepts,
                 record_descriptor_paths=[Path(item) for item in (args.record_json or [])],
                 custody_descriptor_paths=[Path(item) for item in (args.custody_json or [])],
+                provenance_descriptor_paths=[Path(item) for item in (args.provenance_json or [])],
             )
             _print_json({"proof_id": manifest.proof_id, "manifest": str(Path(args.output) / "manifest.json")})
             return EXIT_SUCCESS
@@ -781,6 +891,22 @@ def run(argv: Sequence[str] | None = None) -> int:
                     _print_custody_inspect_human(result)
                 return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
             parser.error("Unknown custody command")
+        elif args.command == "provenance":
+            if args.provenance_command == "validate":
+                result = _provenance_validation_summary(Path(args.descriptor))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_provenance_validate_human(result)
+                return EXIT_SUCCESS
+            if args.provenance_command == "inspect":
+                result = _provenance_inspection(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_provenance_inspect_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown provenance command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))

@@ -6,7 +6,7 @@ A Proof Concept is a bounded claim model. It defines what is being claimed, what
 
 Registry presence does not imply operational support.
 
-Executable status is controlled by a separate execution registry. In this slice, `integrity`, `existence`, and `records` are executable.
+Executable status is controlled by a separate execution registry. In this slice, `integrity`, `existence`, `records`, `custody`, and `provenance` are executable.
 
 ## Maturity Values
 
@@ -43,6 +43,7 @@ These are not binary REAL or FAKE labels.
 | existence | locally_supported | Local timestamp and imported-receipt handling are available; independently verified external timestamping is absent. |
 | records | locally_supported | Canonical record envelopes can be declared, stored, linked to the subject digest, and verified for packet-internal consistency. Declared metadata truth, authority, completeness, ownership, identity, authorship, authenticity, legal validity, and external record-management requirements are not established. |
 | custody | locally_supported | Canonical custody-event envelopes can be declared, hash-linked, bound to the subject digest, and verified for retained packet-internal consistency. Physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, and legal admissibility are not established. |
+| provenance | locally_supported | Canonical declared lineage edges can be bound to the subject digest and declared parent digests. Parent existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, truth, complete lineage, legal validity, and external registration are not established. |
 | lineage | locally_supported | Recorded relationships are assessed; completeness of history is not proven. |
 | authenticity | modelled | Digest and signature checks do not establish real-world authenticity. |
 | ownership | modelled | Requires identity, authority, entitlement and jurisdiction-specific external evidence. |
@@ -83,6 +84,7 @@ python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
 python -m tohupono concept inspect custody --json
+python -m tohupono concept inspect provenance --json
 ```
 
 `concept list` reports concept ID, display name, maturity, executable status, and concise claim boundary. `concept inspect` expands the exact claim, subject, evidence, verification procedure, trust assumptions, failure conditions, limitations, privacy implications, and legal boundary.
@@ -96,6 +98,7 @@ python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
 python -m tohupono prove ./file.bin --concept custody --custody-json ./custody.json
+python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
 ```
 
 When no concept is supplied, `prove` requests `integrity` and `existence`. TohuPono does not provide `--all`; a proof operation must not silently claim every registered concept.
@@ -105,6 +108,8 @@ The selected concept IDs are canonicalised and stored in the manifest. Changing 
 `records` is not part of the default concept set. To request Proof of Records, select `--concept records` and provide at least one strict JSON descriptor with `--record-json`. Supplying `--record-json` without selecting `records` is an input error.
 
 `custody` is not part of the default concept set. To request Proof of Custody, select `--concept custody` and provide at least one strict JSON descriptor with `--custody-json`. Supplying `--custody-json` without selecting `custody` is an input error.
+
+`provenance` is not part of the default concept set. To request Proof of Provenance, select `--concept provenance` and provide at least one strict JSON descriptor with `--provenance-json`. Supplying `--provenance-json` without selecting `provenance` is an input error.
 
 ## Proof of Records
 
@@ -171,6 +176,14 @@ Allowed event types are `created`, `received`, `transferred`, `copied`, `verifie
 For multiple custody events, descriptors must provide `occurred_at`; events are ordered by occurred time and then by canonical descriptor digest as a deterministic tiebreaker. A single event may omit `occurred_at`.
 
 Custody data is stored in the manifest. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
+
+## Proof of Provenance
+
+Proof of Provenance makes a narrow packet-internal claim: the proof packet contains canonical declared lineage relationships binding the recorded subject digest to declared parent digests, and the retained lineage declarations are internally consistent.
+
+It does not prove that parent files exist, that declared transformations occurred, verified origin, authorship, ownership, authenticity, authority, consent, content truth, complete lineage, legal validity, external registration, or external timestamp validity. Parent digests, operations, actors, references, occurred-time values, and attributes are declared metadata only.
+
+Provenance descriptors use strict JSON and create canonical `prv_...` edge identifiers. The current proved subject digest is injected as the child; descriptors cannot provide child digests or edge IDs.
 
 ## Legacy Packets
 

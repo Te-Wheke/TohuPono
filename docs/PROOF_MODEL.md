@@ -41,7 +41,8 @@ The first executable Proof Concepts are:
 - `integrity`;
 - `existence`;
 - `records`.
-- `custody`.
+- `custody`;
+- `provenance`.
 
 Registered concepts such as `authenticity`, `ownership`, and `reality` are not made executable merely by appearing in the registry.
 
@@ -121,6 +122,12 @@ Proof of Custody is explicit and descriptor-driven. It is not included in the de
 
 The `custody` Proof Concept claim references event IDs in retained sequence order and the stored chain head. Verification fails if the claim and stored custody section diverge.
 
+Proof of Provenance is explicit and descriptor-driven. It is not included in the default concept set. A provenance proof requires `--concept provenance` and at least one `--provenance-json` descriptor. New provenance packets include a top-level `provenance` section with `schema_version`, `edge_count`, and canonical edges sorted by `edge_id`.
+
+`edge_id` is `prv_` plus the first 32 hexadecimal characters of SHA-256 over the canonical edge body excluding `edge_id`. The child digest is injected from the proved subject. Parent digests, operations, actors, references, occurred-time values, and attributes are declared metadata only.
+
+The `provenance` Proof Concept claim references stored edge IDs and the child digest. Verification fails if the claim and stored provenance section diverge.
+
 Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
 
 Initial maturity assignments:
@@ -129,6 +136,7 @@ Initial maturity assignments:
 - `existence`: `locally_supported`, limited to local timestamp and imported-receipt handling;
 - `records`: `locally_supported`, limited to canonical packet-internal record envelopes and subject-digest linkage;
 - `custody`: `locally_supported`, limited to canonical packet-internal custody-event envelopes and retained hash-link consistency;
+- `provenance`: `locally_supported`, limited to canonical packet-internal declared lineage edges and child/parent digest linkage;
 - `lineage`: `locally_supported`, limited to recorded relationships;
 - `authenticity`: `modelled`;
 - `ownership`: `modelled`;
