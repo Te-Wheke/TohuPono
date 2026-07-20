@@ -21,6 +21,7 @@ def test_concept_list_json_is_deterministic_and_sorted() -> None:
     assert ids == sorted(ids)
     executable = {item["concept_id"]: item["executable"] for item in data["concepts"]}
     assert executable["custody"] is True
+    assert executable["identity"] is True
     assert executable["integrity"] is True
     assert executable["existence"] is True
     assert executable["provenance"] is True

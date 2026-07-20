@@ -15,7 +15,7 @@ The project distinguishes:
 
 Proof Concepts are not interchangeable. Registry presence does not imply operational support, and support for integrity does not imply support for authenticity, ownership, authorship, truth, or Proof of Reality.
 
-Executable concept support is currently limited to `integrity`, `existence`, `records`, `custody`, `provenance`, and `transaction`.
+Executable concept support is currently limited to `integrity`, `existence`, `records`, `custody`, `provenance`, `transaction`, and `identity`.
 
 - `integrity` checks whether supplied bytes match the recorded digest.
 - `existence` reviews available timestamp evidence for the recorded digest.
@@ -53,3 +53,5 @@ If a manifest or evidence chain is edited after sealing, verification should fai
 `provenance` does not prove parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, identity, authority, consent, content truth, originality, first creation, complete lineage, absence of omitted intermediate versions, legal validity, external registration, or external timestamp validity. Provenance parents, operations, actors, references, occurred-time values, and attributes are user-declared manifest data. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.
 
 `transaction` does not prove transaction occurrence, payment, delivery, participant identity, consent, authority, ownership before or after the declaration, ownership transfer, contractual formation, legal validity, enforceability, authenticity, authorship, external registration, external timestamp validity, or completeness of transaction history. Transaction participants, references, terms, occurred-time values, and attributes are user-declared manifest data. Do not place credentials, private keys, secrets, payment credentials, unnecessary personal information, or sensitive contractual information in transaction descriptors.
+
+`identity` does not prove that an identifier belongs to a real person or organisation, that an identity exists outside the packet, verified personhood, verified organisational status, government recognition, account ownership, control of a cryptographic key, authorship, ownership, authority, consent, authenticity, legal identity, legal capacity, external registration, or external validation. Identity namespaces, identifiers, display names, key fingerprints, references, and attributes are user-declared manifest data. Do not place credentials, private keys, authentication tokens, government identifier numbers, unnecessary personal information, or sensitive identity data in identity descriptors.

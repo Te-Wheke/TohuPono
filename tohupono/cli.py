@@ -25,6 +25,7 @@ from tohupono.core.proof import (
     timestamp_verification_diagnostics,
 )
 from tohupono.custody.validation import load_custody_descriptor, validate_manifest_custody
+from tohupono.identity.validation import load_identity_descriptor, validate_manifest_identities
 from tohupono.reporting.pro_report import generate_report
 from tohupono.provenance.validation import load_provenance_descriptor, validate_manifest_provenance
 from tohupono.records.validation import load_record_descriptor, validate_manifest_records
@@ -254,6 +255,24 @@ def _print_packet_checks(result: dict[str, object]) -> None:
                     print(f"  FAIL: {failure}")
                 for limitation in item.get("limitations") or []:
                     print(f"  LIMIT: {limitation}")
+            if item.get("concept_id") == "identity":
+                print(f"  identity assertions: {item.get('assertion_count', 0)}")
+                for assertion in item.get("assertions") or []:
+                    if not isinstance(assertion, dict):
+                        continue
+                    identity = assertion.get("identity") if isinstance(assertion.get("identity"), dict) else {}
+                    print(
+                        "  - "
+                        f"{assertion.get('assertion_id')} "
+                        f"type={assertion.get('assertion_type')} "
+                        f"declared={identity.get('namespace') if isinstance(identity, dict) else 'unknown'}/"
+                        f"{identity.get('identifier') if isinstance(identity, dict) else 'unknown'} "
+                        f"fingerprint={'yes' if assertion.get('key_fingerprint_present') else 'no'}"
+                    )
+                for failure in item.get("failures") or []:
+                    print(f"  FAIL: {failure}")
+                for limitation in item.get("limitations") or []:
+                    print(f"  LIMIT: {limitation}")
 
 
 def _print_concept_list_human(records: list[dict[str, object]]) -> None:
@@ -409,6 +428,87 @@ def _transaction_inspection(packet: Path) -> dict[str, object]:
         "transactions": validation.transactions,
         "warnings": validation.warnings,
     }
+
+
+def _identity_validation_summary(path: Path) -> dict[str, object]:
+    descriptor = load_identity_descriptor(path)
+    return {
+        "assertion_type": descriptor.assertion_type,
+        "attribute_count": len(descriptor.attributes),
+        "descriptor_schema_version": descriptor.schema_version,
+        "display_name_present": descriptor.identity.get("display_name") is not None,
+        "failures": [],
+        "identifier_present": bool(descriptor.identity.get("identifier")),
+        "identity_namespace": descriptor.identity["namespace"],
+        "key_fingerprint_present": descriptor.key_fingerprint is not None,
+        "key_fingerprint_status": "present" if descriptor.key_fingerprint is not None else "absent",
+        "reference_present": descriptor.reference is not None,
+        "status": "ok",
+        "warnings": [
+            "Descriptor validation does not prove that an identifier belongs to a real person, organisation, account, key holder, or legal entity.",
+            "Do not place credentials, private keys, authentication tokens, government identifier numbers, unnecessary personal information, or sensitive identity data in identity descriptors.",
+        ],
+    }
+
+
+def _identity_inspection(packet: Path) -> dict[str, object]:
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    validation = validate_manifest_identities(manifest)
+    return {
+        "assertion_count": validation.assertion_count,
+        "assertion_ids": validation.assertion_ids,
+        "assertions": validation.assertions,
+        "failures": validation.failures,
+        "identity_schema_status": validation.identity_schema_status,
+        "limitations": validation.limitations,
+        "manifest": str(manifest_path),
+        "status": validation.status,
+        "warnings": validation.warnings,
+    }
+
+
+def _print_identity_validate_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Descriptor schema: {result.get('descriptor_schema_version')}")
+    print(f"Assertion type: {result.get('assertion_type')}")
+    print(f"Identity namespace: {result.get('identity_namespace')}")
+    print(f"Identifier present: {'yes' if result.get('identifier_present') else 'no'}")
+    print(f"Display name present: {'yes' if result.get('display_name_present') else 'no'}")
+    print(f"Key fingerprint: {result.get('key_fingerprint_status')}")
+    print(f"Reference present: {'yes' if result.get('reference_present') else 'no'}")
+    print(f"Attribute count: {result.get('attribute_count')}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+
+
+def _print_identity_inspect_human(result: dict[str, object]) -> None:
+    print(f"Status: {result.get('status')}")
+    print(f"Identity schema: {result.get('identity_schema_status')}")
+    print(f"Assertion count: {result.get('assertion_count')}")
+    for item in result.get("assertions", []):
+        if not isinstance(item, dict):
+            continue
+        identity = item.get("identity") if isinstance(item.get("identity"), dict) else {}
+        attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        print(f"Assertion ID: {item.get('assertion_id')}")
+        print(f"Assertion type: {item.get('assertion_type')}")
+        print(
+            "Declared identity: "
+            f"{identity.get('namespace')}/{identity.get('identifier')}"
+            if isinstance(identity, dict)
+            else "Declared identity: unknown"
+        )
+        print(f"Display name present: {'yes' if isinstance(identity, dict) and identity.get('display_name') is not None else 'no'}")
+        print(f"Key fingerprint present: {'yes' if item.get('key_fingerprint') is not None else 'no'}")
+        print(f"Reference present: {'yes' if item.get('reference') is not None else 'no'}")
+        print(f"Attribute count: {len(attributes) if isinstance(attributes, dict) else 0}")
+    for failure in result.get("failures", []):
+        print(f"FAIL: {failure}")
+    for warning in result.get("warnings", []):
+        print(f"WARN: {warning}")
+    for limitation in result.get("limitations", []):
+        print(f"LIMIT: {limitation}")
 
 
 def _print_transaction_validate_human(result: dict[str, object]) -> None:
@@ -790,6 +890,7 @@ def build_parser() -> argparse.ArgumentParser:
     prove_cmd.add_argument("--custody-json", action="append", dest="custody_json")
     prove_cmd.add_argument("--provenance-json", action="append", dest="provenance_json")
     prove_cmd.add_argument("--transaction-json", action="append", dest="transaction_json")
+    prove_cmd.add_argument("--identity-json", action="append", dest="identity_json")
 
     concept_cmd = sub.add_parser("concept", help="Inspect Proof Concept registry entries.")
     concept_sub = concept_cmd.add_subparsers(dest="concept_command", required=True)
@@ -834,6 +935,15 @@ def build_parser() -> argparse.ArgumentParser:
     transaction_inspect_cmd = transaction_sub.add_parser("inspect", help="Inspect transactions stored in a proof packet.")
     transaction_inspect_cmd.add_argument("packet")
     transaction_inspect_cmd.add_argument("--json", action="store_true")
+
+    identity_cmd = sub.add_parser("identity", help="Validate and inspect Proof of Identity metadata.")
+    identity_sub = identity_cmd.add_subparsers(dest="identity_command", required=True)
+    identity_validate_cmd = identity_sub.add_parser("validate", help="Validate an identity descriptor JSON file.")
+    identity_validate_cmd.add_argument("descriptor")
+    identity_validate_cmd.add_argument("--json", action="store_true")
+    identity_inspect_cmd = identity_sub.add_parser("inspect", help="Inspect identity assertions stored in a proof packet.")
+    identity_inspect_cmd.add_argument("packet")
+    identity_inspect_cmd.add_argument("--json", action="store_true")
 
     verify_cmd = sub.add_parser("verify", help="Verify a packet, or verify a file with --proof.")
     verify_cmd.add_argument("target")
@@ -955,6 +1065,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 concept_ids=args.concepts,
                 record_descriptor_paths=[Path(item) for item in (args.record_json or [])],
                 custody_descriptor_paths=[Path(item) for item in (args.custody_json or [])],
+                identity_descriptor_paths=[Path(item) for item in (args.identity_json or [])],
                 provenance_descriptor_paths=[Path(item) for item in (args.provenance_json or [])],
                 transaction_descriptor_paths=[Path(item) for item in (args.transaction_json or [])],
             )
@@ -1040,6 +1151,22 @@ def run(argv: Sequence[str] | None = None) -> int:
                     _print_transaction_inspect_human(result)
                 return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
             parser.error("Unknown transaction command")
+        elif args.command == "identity":
+            if args.identity_command == "validate":
+                result = _identity_validation_summary(Path(args.descriptor))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_identity_validate_human(result)
+                return EXIT_SUCCESS
+            if args.identity_command == "inspect":
+                result = _identity_inspection(Path(args.packet))
+                if args.json:
+                    _print_json(result)
+                else:
+                    _print_identity_inspect_human(result)
+                return EXIT_VERIFICATION_FAILED if result["status"] == "fail" else EXIT_SUCCESS
+            parser.error("Unknown identity command")
         elif args.command == "verify":
             if args.proof:
                 result = verify_file(Path(args.target), Path(args.proof))

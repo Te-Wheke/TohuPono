@@ -18,6 +18,12 @@ from tohupono.concepts.execution import (
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
 from tohupono.custody.validation import build_custody_chain, load_custody_descriptor
+from tohupono.identity.validation import (
+    build_identity_assertion,
+    build_identity_collection,
+    identity_assertion_ids_from_collection,
+    load_identity_descriptor,
+)
 from tohupono.provenance.validation import (
     build_provenance_collection,
     build_provenance_edge,
@@ -83,6 +89,7 @@ class ProofManifest:
     proof_concepts: dict[str, object]
     records: dict[str, object] | None
     custody: dict[str, object] | None
+    identities: dict[str, object] | None
     provenance: dict[str, object] | None
     transactions: dict[str, object] | None
     evidence: dict[str, list[dict[str, object]]]
@@ -106,6 +113,7 @@ def proof_id_seed(
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
     transactions: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -138,6 +146,11 @@ def proof_id_seed(
             else [],
             "schema_version": custody.get("schema_version") if isinstance(custody, dict) else None,
         }
+    if identities is not None:
+        seed["identities"] = {
+            "assertion_ids": identity_assertion_ids_from_collection(identities),
+            "schema_version": identities.get("schema_version") if isinstance(identities, dict) else None,
+        }
     if provenance is not None:
         seed["provenance"] = {
             "edge_ids": provenance_edge_ids_from_collection(provenance),
@@ -157,11 +170,12 @@ def make_proof_id(
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
     transactions: dict[str, object] | None = None,
 ) -> str:
     digest = hashlib.sha256(
-        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody, provenance, transactions))
+        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody, identities, provenance, transactions))
     ).hexdigest()
     return f"tp_{digest[:32]}"
 
@@ -287,6 +301,7 @@ def build_manifest(
     concept_ids: tuple[str, ...] | None = None,
     records: dict[str, object] | None = None,
     custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
     transactions: dict[str, object] | None = None,
 ) -> ProofManifest:
@@ -294,7 +309,7 @@ def build_manifest(
     warnings: list[str] = []
     if identity.blake3 is None:
         warnings.append("BLAKE3 unavailable; optional BLAKE3 digest was not recorded.")
-    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody, provenance, transactions)
+    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody, identities, provenance, transactions)
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
@@ -312,9 +327,10 @@ def build_manifest(
                 "evidence_refs": [],
             }
         ],
-        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody, provenance, transactions),
+        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody, provenance, transactions, identities),
         records=records,
         custody=custody,
+        identities=identities,
         provenance=provenance,
         transactions=transactions,
         evidence={
@@ -409,6 +425,7 @@ def create_proof_packet(
     custody_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
     provenance_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
     transaction_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    identity_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
 ) -> ProofManifest:
     identity = inspect_file(source)
     sealed_at = sealed_at_utc or utc_now_iso()
@@ -423,6 +440,11 @@ def create_proof_packet(
         raise ValueError("Proof of Custody requires at least one --custody-json descriptor.")
     if custody_paths and "custody" not in selected_concepts:
         raise ValueError("--custody-json requires selecting --concept custody.")
+    identity_paths = list(identity_descriptor_paths or [])
+    if "identity" in selected_concepts and not identity_paths:
+        raise ValueError("Proof of Identity requires at least one --identity-json descriptor.")
+    if identity_paths and "identity" not in selected_concepts:
+        raise ValueError("--identity-json requires selecting --concept identity.")
     provenance_paths = list(provenance_descriptor_paths or [])
     if "provenance" in selected_concepts and not provenance_paths:
         raise ValueError("Proof of Provenance requires at least one --provenance-json descriptor.")
@@ -454,6 +476,17 @@ def create_proof_packet(
             subject_algorithm="sha256",
             subject_digest=identity.sha256,
         )
+    identity_collection: dict[str, object] | None = None
+    if identity_paths:
+        assertions = [
+            build_identity_assertion(
+                load_identity_descriptor(descriptor_path),
+                subject_algorithm="sha256",
+                subject_digest=identity.sha256,
+            )
+            for descriptor_path in identity_paths
+        ]
+        identity_collection = build_identity_collection(assertions)
     provenance_collection: dict[str, object] | None = None
     if provenance_paths:
         edges = [
@@ -476,7 +509,7 @@ def create_proof_packet(
             for descriptor_path in transaction_paths
         ]
         transaction_collection = build_transaction_collection(transactions)
-    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection, provenance_collection, transaction_collection)
+    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection, identity_collection, provenance_collection, transaction_collection)
     _assert_can_create_packet(output)
     output.mkdir(parents=True, exist_ok=True)
 
@@ -486,6 +519,8 @@ def create_proof_packet(
         manifest_dict.pop("records", None)
     if manifest_dict.get("custody") is None:
         manifest_dict.pop("custody", None)
+    if manifest_dict.get("identities") is None:
+        manifest_dict.pop("identities", None)
     if manifest_dict.get("provenance") is None:
         manifest_dict.pop("provenance", None)
     if manifest_dict.get("transactions") is None:

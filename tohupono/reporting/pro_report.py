@@ -250,6 +250,37 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
                     )
                 )
                 story.append(transaction_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "identity":
+                continue
+            assertions = result.get("assertions") if isinstance(result.get("assertions"), list) else []
+            rows = [["Assertion ID", "Type", "Declared Namespace", "Fingerprint"]]
+            for item in assertions:
+                if not isinstance(item, dict):
+                    continue
+                identity = item.get("identity") if isinstance(item.get("identity"), dict) else {}
+                rows.append(
+                    [
+                        _safe(item.get("assertion_id")),
+                        _safe(item.get("assertion_type")),
+                        _safe(identity.get("namespace") if isinstance(identity, dict) else "unknown"),
+                        _safe("present" if item.get("key_fingerprint_present") else "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Identity Details", styles["Heading3"]))
+                identity_table = Table(rows, colWidths=[145, 105, 125, 105])
+                identity_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(identity_table)
     else:
         story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
     story.append(
@@ -284,6 +315,13 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         Paragraph(
             "Proof of Transaction verifies canonical declared transaction envelopes retained in the packet. "
             "It does not independently prove that a transaction, payment, delivery, consent, ownership transfer, or legal agreement occurred.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Identity verifies canonical declared identity assertions retained in the packet. "
+            "It does not independently verify a person, organisation, identifier, account, key holder, authority, authorship, ownership, or legal identity.",
             styles["Normal"],
         )
     )

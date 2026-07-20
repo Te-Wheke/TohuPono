@@ -44,6 +44,7 @@ The first executable Proof Concepts are:
 - `custody`;
 - `provenance`;
 - `transaction`.
+- `identity`.
 
 Registered concepts such as `authenticity`, `ownership`, and `reality` are not made executable merely by appearing in the registry.
 
@@ -135,6 +136,12 @@ Proof of Transaction is explicit and descriptor-driven. It is not included in th
 
 The `transaction` Proof Concept claim references stored transaction IDs and the subject digest. Verification fails if the claim and stored transaction section diverge.
 
+Proof of Identity is explicit and descriptor-driven. It is not included in the default concept set. An identity proof requires `--concept identity` and at least one `--identity-json` descriptor. New identity packets include a top-level `identities` section with `schema_version`, `assertion_count`, and canonical identity assertion envelopes sorted by `assertion_id`.
+
+`assertion_id` is `idn_` plus the first 32 hexadecimal characters of SHA-256 over the canonical assertion body excluding `assertion_id`. The subject digest is injected from the proved subject. Namespaces, identifiers, display names, key fingerprints, references, and attributes are declared metadata only.
+
+The `identity` Proof Concept claim references stored assertion IDs and the subject digest. Verification fails if the claim and stored identity section diverge.
+
 Legacy manifests without `proof_concepts` remain verifiable. TohuPono does not fabricate stored declarations for legacy packets; it reports inferred legacy checks separately.
 
 Initial maturity assignments:
@@ -145,6 +152,7 @@ Initial maturity assignments:
 - `custody`: `locally_supported`, limited to canonical packet-internal custody-event envelopes and retained hash-link consistency;
 - `provenance`: `locally_supported`, limited to canonical packet-internal declared lineage edges and child/parent digest linkage;
 - `transaction`: `locally_supported`, limited to canonical packet-internal declared transaction envelopes and subject/participant linkage;
+- `identity`: `locally_supported`, limited to canonical packet-internal declared identity assertions and subject/identifier linkage;
 - `lineage`: `locally_supported`, limited to recorded relationships;
 - `authenticity`: `modelled`;
 - `ownership`: `modelled`;

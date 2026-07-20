@@ -12,6 +12,11 @@ from tohupono.custody.validation import (
     CUSTODY_COLLECTION_SCHEMA_VERSION,
     validate_manifest_custody,
 )
+from tohupono.identity.validation import (
+    IDENTITY_COLLECTION_SCHEMA_VERSION,
+    identity_assertion_ids_from_collection,
+    validate_manifest_identities,
+)
 from tohupono.provenance.validation import (
     PROVENANCE_COLLECTION_SCHEMA_VERSION,
     provenance_edge_ids_from_collection,
@@ -31,7 +36,7 @@ from tohupono.transaction.validation import (
 
 PROOF_CONCEPTS_SCHEMA_VERSION = "tohupono.proof_concepts.v1"
 DEFAULT_EXECUTABLE_CONCEPTS: tuple[str, ...] = ("existence", "integrity")
-EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "integrity", "provenance", "records", "transaction")
+EXECUTABLE_CONCEPTS: tuple[str, ...] = ("custody", "existence", "identity", "integrity", "provenance", "records", "transaction")
 CONCEPT_RESULT_STATUSES: tuple[str, ...] = ("PASS", "WARN", "FAIL", "UNPROVEN")
 _CONCEPT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BIDI_CONTROLS = {
@@ -177,6 +182,14 @@ def _transaction_claim_parameters(file_sha256: str, transactions: dict[str, obje
     }
 
 
+def _identity_claim_parameters(file_sha256: str, identities: dict[str, object] | None) -> dict[str, object]:
+    return {
+        "assertion_ids": identity_assertion_ids_from_collection(identities),
+        "identities_schema_version": IDENTITY_COLLECTION_SCHEMA_VERSION,
+        "subject": {"algorithm": "sha256", "digest": file_sha256},
+    }
+
+
 def build_proof_concepts_declaration(
     file_sha256: str,
     concept_ids: tuple[str, ...],
@@ -184,6 +197,7 @@ def build_proof_concepts_declaration(
     custody: dict[str, object] | None = None,
     provenance: dict[str, object] | None = None,
     transactions: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
 ) -> dict[str, object]:
     claims: list[dict[str, object]] = []
     for concept_id in concept_ids:
@@ -193,6 +207,8 @@ def build_proof_concepts_declaration(
             parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
         elif concept_id == "custody":
             parameters = _custody_claim_parameters(custody)
+        elif concept_id == "identity":
+            parameters = _identity_claim_parameters(file_sha256, identities)
         elif concept_id == "provenance":
             parameters = _provenance_claim_parameters(file_sha256, provenance)
         elif concept_id == "transaction":
@@ -268,6 +284,8 @@ def _expected_claim(concept_id: str, file_sha256: str, manifest: dict[str, Any])
         parameters = {"timestamp_policy": DEFAULT_TIMESTAMP_POLICY}
     elif concept_id == "custody":
         parameters = _custody_claim_parameters(manifest.get("custody") if isinstance(manifest.get("custody"), dict) else None)
+    elif concept_id == "identity":
+        parameters = _identity_claim_parameters(file_sha256, manifest.get("identities") if isinstance(manifest.get("identities"), dict) else None)
     elif concept_id == "provenance":
         parameters = _provenance_claim_parameters(file_sha256, manifest.get("provenance") if isinstance(manifest.get("provenance"), dict) else None)
     elif concept_id == "transaction":
@@ -326,6 +344,11 @@ def _validate_claim(
         parameters = claim.get("parameters")
         if not isinstance(parameters, dict):
             raise ValueError("Proof of Custody claim parameters must be an object.")
+        expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
+    elif concept_id == "identity":
+        parameters = claim.get("parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("Proof of Identity claim parameters must be an object.")
         expected_claim_id = make_claim_id(concept_id, expected["subject"], parameters)
     elif concept_id == "provenance":
         parameters = claim.get("parameters")
@@ -725,6 +748,57 @@ def evaluate_transaction(
     return result
 
 
+def evaluate_identity(
+    manifest: dict[str, Any],
+    *,
+    claim_id: str | None,
+    expected_assertion_ids: list[str],
+    expected_subject: dict[str, object] | None,
+) -> dict[str, object]:
+    validation = validate_manifest_identities(
+        manifest,
+        expected_assertion_ids=expected_assertion_ids,
+        expected_subject=expected_subject,
+    )
+    checks: list[dict[str, str]] = []
+    for failure in validation.failures:
+        checks.append({"status": "FAIL", "message": failure})
+    for warning in validation.warnings:
+        checks.append({"status": "WARN", "message": warning})
+    if validation.status == "pass":
+        checks.insert(0, {"status": "PASS", "message": "identity assertions are canonical and linked to the subject digest."})
+    status = "PASS" if validation.status == "pass" else "FAIL"
+    evidence_summary = (
+        f"Identity assertion count {validation.assertion_count}; assertion IDs {', '.join(validation.assertion_ids) if validation.assertion_ids else 'none'}."
+    )
+    result = _result(
+        concept_id="identity",
+        status=status,
+        claim_id=claim_id,
+        checks=checks,
+        limitations=validation.limitations,
+        evidence_summary=evidence_summary,
+    )
+    result["identity_schema_status"] = validation.identity_schema_status
+    result["assertion_count"] = validation.assertion_count
+    result["assertion_ids"] = validation.assertion_ids
+    result["assertions"] = [
+        {
+            "assertion_id": item.get("assertion_id"),
+            "assertion_type": item.get("assertion_type"),
+            "attribute_count": len(item.get("attributes", {})) if isinstance(item.get("attributes"), dict) else 0,
+            "identity": item.get("identity"),
+            "key_fingerprint_present": item.get("key_fingerprint") is not None,
+            "reference": item.get("reference"),
+            "subject": item.get("subject"),
+        }
+        for item in validation.assertions
+    ]
+    result["failures"] = validation.failures
+    result["warnings"] = validation.warnings
+    return result
+
+
 def evaluate_declared_concepts(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -771,6 +845,22 @@ def evaluate_declared_concepts(
                     claim_id=claim_id,
                     expected_event_ids=expected_event_ids,
                     expected_chain_head=chain_head,
+                )
+            )
+        elif concept_id == "identity":
+            parameters = claim.get("parameters") if isinstance(claim.get("parameters"), dict) else {}
+            raw_assertion_ids = parameters.get("assertion_ids") if isinstance(parameters, dict) else []
+            if parameters.get("identities_schema_version") != IDENTITY_COLLECTION_SCHEMA_VERSION:
+                expected_assertion_ids = ["__invalid_identity_schema__"]
+            else:
+                expected_assertion_ids = [str(item) for item in raw_assertion_ids] if isinstance(raw_assertion_ids, list) else []
+            subject = parameters.get("subject") if isinstance(parameters.get("subject"), dict) else {"algorithm": "sha256", "digest": "__invalid_identity_subject__"}
+            results.append(
+                evaluate_identity(
+                    manifest,
+                    claim_id=claim_id,
+                    expected_assertion_ids=expected_assertion_ids,
+                    expected_subject=subject,
                 )
             )
         elif concept_id == "existence":

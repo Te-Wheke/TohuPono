@@ -26,6 +26,10 @@
 - Added repeatable `prove --transaction-json` for explicit `--concept transaction` proofs.
 - Added `tohupono transaction validate` and `tohupono transaction inspect` for descriptor validation and packet transaction inspection.
 - Added audit and report integration for Proof of Transaction without asserting transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, or enforceability.
+- Added executable Proof of Identity support through strict JSON identity descriptors, canonical identity assertion envelopes, deterministic `idn_...` assertion IDs, subject binding, and identity claim linkage.
+- Added repeatable `prove --identity-json` for explicit `--concept identity` proofs.
+- Added `tohupono identity validate` and `tohupono identity inspect` for descriptor validation and packet identity inspection.
+- Added audit and report integration for Proof of Identity without asserting verified identity, personhood, organisational status, key control, authority, authorship, ownership, legal identity, or external validation.
 - Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
 - Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
 - Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.
