@@ -46,6 +46,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EDGE_ID_RE = re.compile(r"^prv_[0-9a-f]{32}$")
 _DESCRIPTOR_FIELDS = {"schema_version", "relation_type", "parent", "operation", "occurred_at", "actor", "reference", "attributes"}
 _EDGE_FIELDS = {"edge_id", "schema_version", "relation_type", "child", "parent", "operation", "occurred_at", "actor", "reference", "attributes"}
+_COLLECTION_FIELDS = {"edge_count", "edges", "schema_version"}
 
 
 class ProvenanceValidationError(ValueError):
@@ -328,6 +329,8 @@ def validate_manifest_provenance(
     if section is None:
         return _failure("provenance_section_missing")
     if not isinstance(section, dict):
+        return _failure("provenance_edges_invalid")
+    if sorted(set(section) - _COLLECTION_FIELDS):
         return _failure("provenance_edges_invalid")
     if section.get("schema_version") != PROVENANCE_COLLECTION_SCHEMA_VERSION:
         return _failure("provenance_schema_unsupported")

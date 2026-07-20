@@ -56,6 +56,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _TRANSACTION_ID_RE = re.compile(r"^txn_[0-9a-f]{32}$")
 _DESCRIPTOR_FIELDS = {"schema_version", "transaction_type", "participants", "occurred_at", "reference", "terms", "attributes"}
 _ENVELOPE_FIELDS = {"transaction_id", "schema_version", "transaction_type", "subject", "participants", "occurred_at", "reference", "terms", "attributes"}
+_COLLECTION_FIELDS = {"items", "schema_version", "transaction_count"}
 
 
 class TransactionValidationError(ValueError):
@@ -339,6 +340,8 @@ def validate_manifest_transactions(
     if section is None:
         return _failure("transaction_section_missing")
     if not isinstance(section, dict):
+        return _failure("transaction_items_invalid")
+    if sorted(set(section) - _COLLECTION_FIELDS):
         return _failure("transaction_items_invalid")
     if section.get("schema_version") != TRANSACTION_COLLECTION_SCHEMA_VERSION:
         return _failure("transaction_schema_unsupported")

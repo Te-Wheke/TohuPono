@@ -253,6 +253,7 @@ def _tampered_custody_audit(tmp_path: Path, edit: object) -> dict[str, object]:
         ("missing_section", lambda manifest: manifest.pop("custody"), "custody_section_missing"),
         ("empty", lambda manifest: manifest["custody"].update({"events": [], "event_count": 0}), "custody_empty"),
         ("count", lambda manifest: manifest["custody"].update({"event_count": 99}), "custody_event_count_mismatch"),
+        ("extra_collection_field", lambda manifest: manifest["custody"].update({"verified": True}), "custody_events_invalid"),
         ("schema", lambda manifest: manifest["custody"].update({"schema_version": "tohupono.custody.v99"}), "custody_schema_unsupported"),
         ("event_hash", lambda manifest: manifest["custody"]["events"][0].update({"event_hash": "0" * 64}), "custody_event_hash_mismatch"),
         ("event_id", lambda manifest: manifest["custody"]["events"][0].update({"event_id": "cue_" + "0" * 32}), "custody_event_id_mismatch"),

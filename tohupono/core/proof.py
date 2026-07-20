@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import stat
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -356,6 +358,74 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(canonical_json_text(value) + "\n", encoding="utf-8")
 
 
+def _read_regular_file_limited(path: Path, *, max_bytes: int, label: str) -> bytes:
+    try:
+        before = path.lstat()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(str(path)) from exc
+    if stat.S_ISLNK(before.st_mode):
+        raise ValueError(f"{label} must not be a symlink.")
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"{label} must be a regular file.")
+    if before.st_size > max_bytes:
+        raise ValueError(f"{label} exceeds configured size limit.")
+
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError(f"{label} must be a regular file.")
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError(f"{label} changed during read.")
+        if opened.st_size > max_bytes:
+            raise ValueError(f"{label} exceeds configured size limit.")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while True:
+            chunk = os.read(fd, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+            if remaining <= 0:
+                raise ValueError(f"{label} exceeds configured size limit.")
+        after = os.fstat(fd)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ValueError(f"{label} changed during read.")
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    if len(data) > max_bytes:
+        raise ValueError(f"{label} exceeds configured size limit.")
+    return data
+
+
+def _write_new_regular_file_no_follow(path: Path, data: bytes, *, label: str) -> None:
+    if path.exists() or path.is_symlink():
+        raise TimestampReceiptConflictError(f"Refusing to overwrite existing {label}.")
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        written = 0
+        while written < len(data):
+            written += os.write(fd, data[written:])
+    finally:
+        os.close(fd)
+
+
 def sha256_text(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -575,9 +645,15 @@ def create_proof_packet(
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
-    if path.exists() and path.stat().st_size > MAX_RECEIPT_METADATA_BYTES * 4:
-        raise ValueError("Structured proof input exceeds configured size limit.")
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = _read_regular_file_limited(
+        path,
+        max_bytes=MAX_RECEIPT_METADATA_BYTES * 4,
+        label="Structured proof input",
+    )
+    try:
+        return json.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("Structured proof input must be UTF-8 JSON.") from exc
 
 
 def _file_sha256(path: Path) -> str:
@@ -592,11 +668,17 @@ def list_timestamp_receipts(packet: Path) -> list[dict[str, object]]:
     receipts_dir = timestamp_receipts_dir(packet)
     if not receipts_dir.exists():
         return []
+    if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+        return [
+            {
+                "receipt_id": "timestamp_receipts",
+                "receipt_status": "invalid",
+                "warnings": ["Timestamp receipt directory is unsafe."],
+            }
+        ]
     receipts: list[dict[str, object]] = []
     for receipt_path in sorted(receipts_dir.glob("receipt_*.json")):
         try:
-            if receipt_path.stat().st_size > MAX_RECEIPT_METADATA_BYTES:
-                raise ValueError("timestamp receipt metadata exceeds configured size limit")
             receipt = load_manifest(receipt_path)
         except (OSError, ValueError, json.JSONDecodeError):
             receipts.append(
@@ -652,14 +734,15 @@ def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str
     file_info = manifest.get("file", {})
     if not isinstance(file_info, dict) or not file_info.get("sha256"):
         raise ValueError("Proof manifest does not contain a target file digest.")
-    if not receipt_file.exists() or not receipt_file.is_file():
-        raise FileNotFoundError(str(receipt_file))
-    if receipt_file.stat().st_size > MAX_RECEIPT_BYTES:
-        raise ValueError("Timestamp receipt exceeds configured size limit.")
+    receipt_bytes = _read_regular_file_limited(
+        receipt_file,
+        max_bytes=MAX_RECEIPT_BYTES,
+        label="Timestamp receipt",
+    )
 
     target_digest = str(file_info["sha256"])
-    receipt_sha256 = _file_sha256(receipt_file)
-    receipt_size = receipt_file.stat().st_size
+    receipt_sha256 = hashlib.sha256(receipt_bytes).hexdigest()
+    receipt_size = len(receipt_bytes)
     receipt_id = make_receipt_id(
         receipt_type=receipt_type,
         receipt_sha256=receipt_sha256,
@@ -669,11 +752,17 @@ def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str
     receipts_dir = manifest_path.parent / "timestamp_receipts"
     receipt_metadata_path = receipts_dir / f"receipt_{receipt_id}.json"
     stored_receipt_path = receipts_dir / f"receipt_{receipt_id}.bin"
-    if receipt_metadata_path.exists() or stored_receipt_path.exists():
+    if receipts_dir.exists():
+        if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+            raise ValueError("Timestamp receipt directory is unsafe.")
+    else:
+        receipts_dir.mkdir(exist_ok=False)
+    if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+        raise ValueError("Timestamp receipt directory is unsafe.")
+    if receipt_metadata_path.exists() or receipt_metadata_path.is_symlink() or stored_receipt_path.exists() or stored_receipt_path.is_symlink():
         raise TimestampReceiptConflictError("Refusing to overwrite existing timestamp receipt import.")
 
-    receipts_dir.mkdir(exist_ok=True)
-    shutil.copyfile(receipt_file, stored_receipt_path)
+    _write_new_regular_file_no_follow(stored_receipt_path, receipt_bytes, label="timestamp receipt import")
     adapter_type = receipt_type if receipt_type in {"manual", "opentimestamps", "rfc3161"} else "none"
     record = TimestampReceipt(
         receipt_id=receipt_id,
@@ -688,7 +777,11 @@ def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str
         imported_at=utc_now_iso(),
         warnings=[UNVERIFIED_RECEIPT_WARNING],
     ).to_dict()
-    write_json(receipt_metadata_path, record)
+    _write_new_regular_file_no_follow(
+        receipt_metadata_path,
+        canonical_json_bytes(record) + b"\n",
+        label="timestamp receipt metadata",
+    )
     return {
         "receipt": record,
         "receipt_metadata_path": str(receipt_metadata_path),
@@ -717,7 +810,13 @@ def timestamp_verification_diagnostics(
     checks: list[dict[str, str]] = []
 
     if timestamp_status == "anchored":
-        checks.append({"status": "PASS", "message": "timestamp proof is externally anchored."})
+        failures.append("timestamp_anchored_unverified")
+        checks.append(
+            {
+                "status": "FAIL",
+                "message": "manifest-declared anchored timestamp is not externally verified by TohuPono.",
+            }
+        )
     elif timestamp_status == "local_only":
         message = "timestamp is local-only and not externally anchored."
         if policy == "strict_external":
@@ -801,7 +900,13 @@ def timestamp_verification_diagnostics(
                 failures.append(f"{receipt_id}_sha256_mismatch")
                 checks.append({"status": "FAIL", "message": "timestamp receipt SHA-256 does not match stored bytes."})
         if receipt.get("receipt_status") == "verified":
-            verified_external_receipt = True
+            failures.append(f"{receipt_id}_verified_receipt_untrusted")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": "timestamp receipt metadata claims verified status without local adapter verification.",
+                }
+            )
         elif receipt.get("receipt_status") == "unverified":
             message = "imported timestamp receipt is present but not externally verified by TohuPono."
             if policy == "strict_external":
@@ -811,7 +916,7 @@ def timestamp_verification_diagnostics(
                 warnings.append(UNVERIFIED_RECEIPT_WARNING)
                 checks.append({"status": "WARN", "message": message})
 
-    if policy == "strict_external" and timestamp_status != "anchored" and not verified_external_receipt:
+    if policy == "strict_external" and not verified_external_receipt:
         failures.append("strict_external_timestamp_missing")
         checks.append({"status": "FAIL", "message": "strict_external policy requires a verified external timestamp."})
 

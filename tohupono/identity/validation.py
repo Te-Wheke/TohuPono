@@ -35,6 +35,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _ASSERTION_ID_RE = re.compile(r"^idn_[0-9a-f]{32}$")
 _DESCRIPTOR_FIELDS = {"schema_version", "assertion_type", "identity", "key_fingerprint", "reference", "attributes"}
 _ASSERTION_FIELDS = {"assertion_id", "schema_version", "assertion_type", "subject", "identity", "key_fingerprint", "reference", "attributes"}
+_COLLECTION_FIELDS = {"assertion_count", "items", "schema_version"}
 _FORBIDDEN_DESCRIPTOR_FIELDS = {"assertion_id", "subject", "proof_id", "claim_id", "verified", "verification_status"}
 
 
@@ -308,6 +309,8 @@ def validate_manifest_identities(
     if section is None:
         return _failure("identity_section_missing")
     if not isinstance(section, dict):
+        return _failure("identity_items_invalid")
+    if sorted(set(section) - _COLLECTION_FIELDS):
         return _failure("identity_items_invalid")
     if section.get("schema_version") != IDENTITY_COLLECTION_SCHEMA_VERSION:
         return _failure("identity_schema_unsupported")

@@ -263,6 +263,7 @@ def _tampered_provenance_audit(tmp_path: Path, edit: object) -> dict[str, object
         ("missing_section", lambda manifest: manifest.pop("provenance"), "provenance_section_missing"),
         ("empty", lambda manifest: manifest["provenance"].update({"edges": [], "edge_count": 0}), "provenance_empty"),
         ("count", lambda manifest: manifest["provenance"].update({"edge_count": 99}), "provenance_edge_count_mismatch"),
+        ("extra_collection_field", lambda manifest: manifest["provenance"].update({"verified": True}), "provenance_edges_invalid"),
         ("schema", lambda manifest: manifest["provenance"].update({"schema_version": "tohupono.provenance.v99"}), "provenance_schema_unsupported"),
         ("edge_id", lambda manifest: manifest["provenance"]["edges"][0].update({"edge_id": "prv_" + "0" * 32}), "provenance_edge_id_mismatch"),
         ("child", lambda manifest: manifest["provenance"]["edges"][0]["child"].update({"digest": "0" * 64}), "provenance_child_digest_mismatch"),

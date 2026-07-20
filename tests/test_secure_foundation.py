@@ -10,6 +10,7 @@ from pathlib import Path
 from tohupono.concepts.model import MATURITY_VALUES
 from tohupono.concepts.registry import concept_registry, get_concept
 from tohupono.core.proof import create_proof_packet, timestamp_verification_diagnostics
+from tohupono.security.paths import PathSecurityError, validate_terminal_text
 from tohupono.timestamping.model import TimestampReceipt
 from tohupono.timestamping.provider import TimestampRequest
 from tohupono.timestamping.registry import timestamp_provider_registry
@@ -134,6 +135,15 @@ def test_timestamp_receipt_path_escape_fails(tmp_path: Path) -> None:
     result = timestamp_verification_diagnostics(packet)
     assert result["status"] == "fail"
     assert any("stored_file_path_invalid" in failure for failure in result["failures"])
+
+
+def test_terminal_text_rejects_c1_controls() -> None:
+    try:
+        validate_terminal_text("safe\u009bunsafe", field="value")
+    except PathSecurityError as exc:
+        assert "control character" in str(exc)
+    else:
+        raise AssertionError("C1 control character was accepted")
 
 
 def test_lifecycle_chain_tampering_fails(tmp_path: Path) -> None:

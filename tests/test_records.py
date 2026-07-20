@@ -294,6 +294,7 @@ def _tampered_records_audit(tmp_path: Path, edit: object) -> dict[str, object]:
     [
         ("missing_section", lambda manifest: manifest.pop("records"), "records_section_missing"),
         ("empty", lambda manifest: manifest["records"].update({"items": []}), "records_empty"),
+        ("extra_collection_field", lambda manifest: manifest["records"].update({"verified": True}), "records_items_invalid"),
         ("unsupported_schema", lambda manifest: manifest["records"].update({"schema_version": "tohupono.records.v99"}), "records_schema_unsupported"),
         ("record_id_mismatch", lambda manifest: manifest["records"]["items"][0]["attributes"].update({"name": "B"}), "record_id_mismatch"),
         ("subject_mismatch", lambda manifest: manifest["records"]["items"][0]["subject"].update({"digest": "0" * 64}), "record_subject_digest_mismatch"),
@@ -349,6 +350,24 @@ def test_claim_and_record_mismatch_failures(tmp_path: Path) -> None:
 
     duplicate = _tampered_records_audit(tmp_path / "duplicate_claim", duplicate_claim)
     assert "record_claim_duplicate_id" in duplicate["failures"]
+
+
+def test_records_claim_order_mismatch_fails(tmp_path: Path) -> None:
+    descriptor_a = _write_descriptor(tmp_path / "a.json", _descriptor(reference="ref-a"))
+    descriptor_b = _write_descriptor(tmp_path / "b.json", _descriptor(reference="ref-b"))
+    _sample, packet = _proof_with_records(tmp_path, descriptor_a, descriptor_b)
+    manifest_path = packet / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    claim = manifest["proof_concepts"]["claims"][0]
+    params = claim["parameters"]
+    params["record_ids"] = list(reversed(params["record_ids"]))
+    claim["claim_id"] = make_claim_id("records", claim["subject"], params)
+    manifest_path.write_text(canonical_json_text(manifest) + "\n", encoding="utf-8")
+    result = run_cli("audit", str(packet), "--json")
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    records_result = next(item for item in data["proof_concept_results"] if item["concept_id"] == "records")
+    assert "record_claim_order_mismatch" in records_result["failures"]
 
 
 def test_record_validate_cli_and_human_privacy(tmp_path: Path) -> None:

@@ -26,7 +26,6 @@ from tohupono.core.proof import (
 )
 from tohupono.custody.validation import load_custody_descriptor, validate_manifest_custody
 from tohupono.identity.validation import load_identity_descriptor, validate_manifest_identities
-from tohupono.reporting.pro_report import generate_report
 from tohupono.provenance.validation import load_provenance_descriptor, validate_manifest_provenance
 from tohupono.records.validation import load_record_descriptor, validate_manifest_records
 from tohupono.timestamping.model import (
@@ -1311,6 +1310,16 @@ def run(argv: Sequence[str] | None = None) -> int:
                 return EXIT_SUCCESS
             parser.error("Unknown key command")
         elif args.command == "report":
+            try:
+                from tohupono.reporting.pro_report import generate_report
+            except ImportError:
+                return _emit_error(
+                    "REPORT_DEPENDENCY_UNAVAILABLE",
+                    "report generation dependencies are unavailable.",
+                    json_mode=_json_mode(args),
+                    exit_code=EXIT_USER_ERROR,
+                )
+
             sig_path = generate_report(
                 proof=Path(args.proof),
                 output=Path(args.output),

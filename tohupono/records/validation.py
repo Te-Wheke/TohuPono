@@ -35,6 +35,7 @@ _RECORD_ID_RE = re.compile(r"^rec_[0-9a-f]{32}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _DESCRIPTOR_FIELDS = {"schema_version", "record_type", "namespace", "reference", "attributes"}
 _RECORD_FIELDS = {"record_id", "schema_version", "record_type", "namespace", "reference", "subject", "attributes"}
+_COLLECTION_FIELDS = {"items", "schema_version"}
 
 
 class RecordValidationError(ValueError):
@@ -312,6 +313,8 @@ def validate_manifest_records(
         return _failure("records_section_missing", "records section is missing")
     if not isinstance(section, dict):
         return _failure("records_items_invalid", "records section must be an object")
+    if sorted(set(section) - _COLLECTION_FIELDS):
+        return _failure("records_items_invalid", "records section contains unsupported fields")
     if section.get("schema_version") != RECORDS_COLLECTION_SCHEMA_VERSION:
         return _failure("records_schema_unsupported", "records schema is unsupported")
     items = section.get("items")
@@ -342,13 +345,14 @@ def validate_manifest_records(
             return _failure("record_claim_ids_invalid", "record claim IDs are invalid", records=records)
         if len(expected) != len(set(expected)):
             return _failure("record_claim_duplicate_id", "record claim contains duplicate IDs", records=records)
-        expected_sorted = sorted(expected)
-        missing = sorted(set(expected_sorted) - set(record_ids))
-        extra = sorted(set(record_ids) - set(expected_sorted))
+        missing = sorted(set(expected) - set(record_ids))
+        extra = sorted(set(record_ids) - set(expected))
         if missing:
             return _failure("record_claim_missing", "record claim references missing records", records=records)
         if extra:
             return _failure("record_claim_undeclared", "record collection contains unclaimed records", records=records)
+        if expected != record_ids:
+            return _failure("record_claim_order_mismatch", "record claim IDs are not in canonical order", records=records)
     warnings = [
         "Declared record metadata is not independently verified for truth, authority, completeness, or legal validity."
     ]

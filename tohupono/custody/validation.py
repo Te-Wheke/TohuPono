@@ -52,6 +52,7 @@ _EVENT_FIELDS = {
     "sequence",
     "subject",
 }
+_COLLECTION_FIELDS = {"chain_head", "event_count", "events", "schema_version"}
 
 
 class CustodyValidationError(ValueError):
@@ -339,6 +340,8 @@ def validate_manifest_custody(
     if section is None:
         return _failure("custody_section_missing")
     if not isinstance(section, dict):
+        return _failure("custody_events_invalid")
+    if sorted(set(section) - _COLLECTION_FIELDS):
         return _failure("custody_events_invalid")
     if section.get("schema_version") != CUSTODY_COLLECTION_SCHEMA_VERSION:
         return _failure("custody_schema_unsupported")

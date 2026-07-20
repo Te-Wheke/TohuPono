@@ -282,6 +282,7 @@ def _tampered_transaction_audit(tmp_path: Path, edit: object) -> dict[str, objec
         ("missing_section", lambda manifest: manifest.pop("transactions"), "transaction_section_missing"),
         ("empty", lambda manifest: manifest["transactions"].update({"items": [], "transaction_count": 0}), "transaction_empty"),
         ("count", lambda manifest: manifest["transactions"].update({"transaction_count": 99}), "transaction_count_mismatch"),
+        ("extra_collection_field", lambda manifest: manifest["transactions"].update({"verified": True}), "transaction_items_invalid"),
         ("schema", lambda manifest: manifest["transactions"].update({"schema_version": "tohupono.transactions.v99"}), "transaction_schema_unsupported"),
         ("id", lambda manifest: manifest["transactions"]["items"][0].update({"transaction_id": "txn_" + "0" * 32}), "transaction_id_mismatch"),
         ("subject", lambda manifest: manifest["transactions"]["items"][0]["subject"].update({"digest": "0" * 64}), "transaction_subject_digest_mismatch"),

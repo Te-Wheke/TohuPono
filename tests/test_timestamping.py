@@ -354,6 +354,30 @@ def test_strict_external_fails_for_local_only_without_external_timestamp(tmp_pat
     assert "timestamp_local_only" in data["failures"]
 
 
+def test_manifest_declared_anchored_timestamp_fails_without_external_verification(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("forged anchored timestamp\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    manifest_path = proof_dir / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    manifest["timestamping"] = {
+        "adapter": "manual",
+        "created_at": manifest["sealed_at_utc"],
+        "receipt": {"type": "self-declared"},
+        "status": "anchored",
+        "target_digest": manifest["file"]["sha256"],
+        "warnings": [],
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--policy", "strict_external", "--json")
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    assert data["status"] == "fail"
+    assert "timestamp_anchored_unverified" in data["failures"]
+    assert data["receipt_count"] == 0
+
+
 def test_unverified_imported_receipt_warns_under_evidence_review(tmp_path: Path) -> None:
     sample = tmp_path / "source.txt"
     sample.write_text("receipt evidence review\n", encoding="utf-8")
@@ -392,6 +416,83 @@ def _import_receipt(proof_dir: Path, receipt: Path) -> dict[str, object]:
     result = run_cli("timestamp", "import", str(proof_dir), str(receipt), "--json")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)["receipt"]
+
+
+def test_self_declared_verified_receipt_status_is_not_trusted(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("self verified receipt\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    record["receipt_status"] = "verified"
+    _receipt_metadata_path(proof_dir).write_text(json.dumps(record), encoding="utf-8")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--policy", "strict_external", "--json")
+    assert result.returncode == 1
+    failures = json.loads(result.stdout)["failures"]
+    assert any("verified_receipt_untrusted" in failure for failure in failures)
+    assert "strict_external_timestamp_missing" in failures
+
+
+def test_timestamp_import_refuses_symlinked_receipt_directory(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("symlink import dir\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    outside = tmp_path / "outside_receipts"
+    outside.mkdir()
+    try:
+        (proof_dir / "timestamp_receipts").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    result = run_cli("timestamp", "import", str(proof_dir), str(receipt), "--json")
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "INVALID_ARGUMENT"
+    assert list(outside.iterdir()) == []
+
+
+def test_manifest_symlink_is_rejected_before_timestamp_read(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("manifest symlink\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    manifest_path = proof_dir / "manifest.json"
+    outside = tmp_path / "outside_manifest.json"
+    outside.write_text(manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
+    manifest_path.unlink()
+    try:
+        manifest_path.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    result = run_cli("timestamp", "inspect", str(proof_dir), "--json")
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_receipt_metadata_symlink_is_rejected_before_timestamp_read(tmp_path: Path) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("receipt metadata symlink\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    metadata_path = _receipt_metadata_path(proof_dir)
+    outside = tmp_path / "outside_receipt.json"
+    outside.write_text(metadata_path.read_text(encoding="utf-8"), encoding="utf-8")
+    metadata_path.unlink()
+    try:
+        metadata_path.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    result = run_cli("timestamp", "verify", str(proof_dir), "--json")
+    assert result.returncode == 1
+    failures = json.loads(result.stdout)["failures"]
+    assert any("metadata_missing_fields" in failure for failure in failures)
+    assert record["receipt_id"] in result.stdout
 
 
 def test_receipt_target_digest_mismatch_is_fail(tmp_path: Path) -> None:
@@ -468,7 +569,8 @@ def test_receipt_symlink_file_is_fail(tmp_path: Path) -> None:
         pytest.skip(f"symlink creation unavailable: {exc}")
     result = run_cli("timestamp", "verify", str(proof_dir), "--json")
     assert result.returncode == 1
-    assert any("stored_file_path_invalid" in failure for failure in json.loads(result.stdout)["failures"])
+    data = json.loads(result.stdout)
+    assert any("stored_file_path_invalid" in failure for failure in data["failures"])
 
 
 def test_receipt_symlinked_receipt_directory_is_fail(tmp_path: Path) -> None:
@@ -499,7 +601,9 @@ def test_receipt_symlinked_receipt_directory_is_fail(tmp_path: Path) -> None:
     (outside / "receipt_symlink_dir.json").write_text(json.dumps(record), encoding="utf-8")
     result = run_cli("timestamp", "verify", str(proof_dir), "--json")
     assert result.returncode == 1
-    assert any("stored_file_path_invalid" in failure for failure in json.loads(result.stdout)["failures"])
+    data = json.loads(result.stdout)
+    assert any("metadata_missing_fields" in failure for failure in data["failures"])
+    assert data["receipts"][0]["warnings"] == ["Timestamp receipt directory is unsafe."]
 
 
 def test_receipt_directory_instead_of_regular_file_is_fail(tmp_path: Path) -> None:

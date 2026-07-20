@@ -18,7 +18,7 @@ def validate_terminal_text(value: str, *, field: str = "value") -> None:
         raise PathSecurityError(f"{field} contains a NUL character")
     for char in value:
         code = ord(char)
-        if code < 32 or code == 127:
+        if code < 32 or code == 127 or 0x80 <= code <= 0x9F:
             raise PathSecurityError(f"{field} contains an ASCII control character")
         if unicodedata.bidirectional(char) in BIDI_CONTROL_CATEGORIES:
             raise PathSecurityError(f"{field} contains a Unicode bidirectional control character")

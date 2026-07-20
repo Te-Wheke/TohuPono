@@ -340,6 +340,7 @@ def _tampered_identity_audit(tmp_path: Path, edit: object) -> dict[str, object]:
         ("missing_section", lambda manifest: manifest.pop("identities"), "identity_section_missing"),
         ("empty", lambda manifest: manifest["identities"].update({"items": [], "assertion_count": 0}), "identity_empty"),
         ("count", lambda manifest: manifest["identities"].update({"assertion_count": 99}), "identity_count_mismatch"),
+        ("extra_collection_field", lambda manifest: manifest["identities"].update({"verified": True}), "identity_items_invalid"),
         ("schema", lambda manifest: manifest["identities"].update({"schema_version": "tohupono.identities.v99"}), "identity_schema_unsupported"),
         ("id", lambda manifest: manifest["identities"]["items"][0].update({"assertion_id": "idn_" + "0" * 32}), "identity_assertion_id_mismatch"),
         ("subject", lambda manifest: manifest["identities"]["items"][0]["subject"].update({"digest": "0" * 64}), "identity_subject_digest_mismatch"),

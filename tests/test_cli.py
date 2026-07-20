@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,38 @@ def test_cli_end_to_end_default_report_key(tmp_path: Path) -> None:
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.sig").exists()
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.pub").exists()
     assert (tmp_path / "keys" / "report_signing_key.pem").exists()
+
+
+def test_report_command_dependency_import_error_is_bounded(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from tohupono import cli
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
+        if name == "tohupono.reporting.pro_report":
+            raise ImportError("blocked report dependency with hostile details")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    result = cli.run(
+        [
+            "report",
+            "--proof",
+            str(tmp_path / "proof_packet" / "manifest.json"),
+            "--output",
+            str(tmp_path / "verification_report.pdf"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "report generation dependencies are unavailable" in captured.err
+    assert "hostile details" not in captured.err
+
 
 def test_verify_json_missing_file_error_shape(tmp_path: Path) -> None:
     sample = tmp_path / "source.txt"
