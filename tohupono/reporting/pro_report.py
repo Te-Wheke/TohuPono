@@ -9,6 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from tohupono.core.proof import load_manifest
+from tohupono.concepts.execution import evaluate_declared_concepts
 from tohupono.trust.keys import export_public_key, sign_bytes
 from tohupono.verdicts.classifier import manifest_signature_status
 from tohupono.core.proof import verify_evidence_chain
@@ -86,6 +87,244 @@ def render_pdf_report(proof: Path, output: Path, community: bool = False) -> Non
         )
     )
     story.append(table)
+    story.append(Spacer(1, 12))
+    concept_diagnostics = evaluate_declared_concepts(proof, manifest)
+    story.append(Paragraph("Proof Concepts", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            "A result for one Proof Concept does not establish another Proof Concept.",
+            styles["Normal"],
+        )
+    )
+    concept_results = concept_diagnostics.get("results") or []
+    if isinstance(concept_results, list) and concept_results:
+        concept_rows = [["Concept", "Status", "Evidence", "Limitations"]]
+        for result in concept_results:
+            if not isinstance(result, dict):
+                continue
+            concept_rows.append(
+                [
+                    _safe(result.get("display_name")),
+                    _safe(result.get("status")),
+                    _safe(result.get("evidence_summary")),
+                    "; ".join(str(item) for item in result.get("limitations", []) if item),
+                ]
+            )
+        concept_table = Table(concept_rows, colWidths=[110, 60, 150, 160])
+        concept_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(concept_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "records":
+                continue
+            records = result.get("records") if isinstance(result.get("records"), list) else []
+            rows = [["Record ID", "Type", "Namespace", "Reference", "Attributes"]]
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                rows.append(
+                    [
+                        _safe(record.get("record_id")),
+                        _safe(record.get("record_type")),
+                        _safe(record.get("namespace")),
+                        _safe(record.get("reference") if record.get("reference") is not None else "none"),
+                        _safe(record.get("attribute_count")),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Records Details", styles["Heading3"]))
+                record_table = Table(rows, colWidths=[150, 70, 80, 120, 60])
+                record_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(record_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "custody":
+                continue
+            events = result.get("events") if isinstance(result.get("events"), list) else []
+            rows = [["Seq", "Event ID", "Type", "Declared Actor", "Declared Time"]]
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+                actor_text = (
+                    f"{actor.get('namespace')}/{actor.get('identifier')}" if isinstance(actor, dict) else "unknown"
+                )
+                rows.append(
+                    [
+                        _safe(event.get("sequence")),
+                        _safe(event.get("event_id")),
+                        _safe(event.get("event_type")),
+                        _safe(actor_text),
+                        _safe(event.get("occurred_at") or "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Custody Details", styles["Heading3"]))
+                story.append(Paragraph(f"Chain head: {_safe(result.get('chain_head'))}", styles["Normal"]))
+                custody_table = Table(rows, colWidths=[35, 145, 70, 120, 110])
+                custody_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(custody_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "provenance":
+                continue
+            edges = result.get("edges") if isinstance(result.get("edges"), list) else []
+            rows = [["Edge ID", "Relation", "Parent Digest", "Operation"]]
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                parent = edge.get("parent") if isinstance(edge.get("parent"), dict) else {}
+                operation = edge.get("operation") if isinstance(edge.get("operation"), dict) else None
+                rows.append(
+                    [
+                        _safe(edge.get("edge_id")),
+                        _safe(edge.get("relation_type")),
+                        _safe(parent.get("digest") if isinstance(parent, dict) else "unknown"),
+                        _safe(operation.get("name") if isinstance(operation, dict) else "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Provenance Details", styles["Heading3"]))
+                provenance_table = Table(rows, colWidths=[145, 90, 180, 65])
+                provenance_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(provenance_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "transaction":
+                continue
+            transactions = result.get("transactions") if isinstance(result.get("transactions"), list) else []
+            rows = [["Transaction ID", "Type", "Participants", "Declared Time"]]
+            for item in transactions:
+                if not isinstance(item, dict):
+                    continue
+                rows.append(
+                    [
+                        _safe(item.get("transaction_id")),
+                        _safe(item.get("transaction_type")),
+                        _safe(item.get("participant_count")),
+                        _safe(item.get("occurred_at") or "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Transaction Details", styles["Heading3"]))
+                transaction_table = Table(rows, colWidths=[145, 85, 80, 170])
+                transaction_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(transaction_table)
+        for result in concept_results:
+            if not isinstance(result, dict) or result.get("concept_id") != "identity":
+                continue
+            assertions = result.get("assertions") if isinstance(result.get("assertions"), list) else []
+            rows = [["Assertion ID", "Type", "Declared Namespace", "Fingerprint"]]
+            for item in assertions:
+                if not isinstance(item, dict):
+                    continue
+                identity = item.get("identity") if isinstance(item.get("identity"), dict) else {}
+                rows.append(
+                    [
+                        _safe(item.get("assertion_id")),
+                        _safe(item.get("assertion_type")),
+                        _safe(identity.get("namespace") if isinstance(identity, dict) else "unknown"),
+                        _safe("present" if item.get("key_fingerprint_present") else "none"),
+                    ]
+                )
+            if len(rows) > 1:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Proof of Identity Details", styles["Heading3"]))
+                identity_table = Table(rows, colWidths=[145, 105, 125, 105])
+                identity_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF2")),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(identity_table)
+    else:
+        story.append(Paragraph("No explicit Proof Concepts declaration is stored in this packet.", styles["Normal"]))
+    story.append(
+        Paragraph(
+            "Integrity matches do not prove authenticity, ownership, authorship, or truth. "
+            "Existence evidence may be local-only, externally verified, missing, or invalid.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Records verifies the packet's canonical record envelope and its link to the recorded subject. "
+            "It does not independently establish that declared record metadata is true, authoritative, complete, or legally valid.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Custody verifies the retained packet's canonical custody-event sequence and internal hash links. "
+            "It does not independently prove physical possession, actor identity, legal custody, complete history, or that the declared events occurred.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Provenance verifies canonical declared lineage relationships retained in the packet. "
+            "It does not independently prove that parent files exist, that declared transformations occurred, or that lineage is complete, authentic, or authoritative.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Transaction verifies canonical declared transaction envelopes retained in the packet. "
+            "It does not independently prove that a transaction, payment, delivery, consent, ownership transfer, or legal agreement occurred.",
+            styles["Normal"],
+        )
+    )
+    story.append(
+        Paragraph(
+            "Proof of Identity verifies canonical declared identity assertions retained in the packet. "
+            "It does not independently verify a person, organisation, identifier, account, key holder, authority, authorship, ownership, or legal identity.",
+            styles["Normal"],
+        )
+    )
     story.append(Spacer(1, 12))
     story.append(Paragraph("Missing evidence is classified as UNPROVEN.", styles["Normal"]))
     story.append(Paragraph("Report signature: detached signature over final PDF bytes.", styles["Normal"]))

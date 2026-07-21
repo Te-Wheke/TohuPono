@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import os
 from pathlib import Path
@@ -33,7 +34,7 @@ from tests.support import run_cli
 
 
 def test_package_imports() -> None:
-    assert tohupono.__version__ == "0.4.0"
+    assert tohupono.__version__ == "0.5.0"
 
 def test_cli_help() -> None:
     result = run_cli("--help")
@@ -50,6 +51,8 @@ def test_cli_help() -> None:
         "compare",
         "amend",
         "audit",
+        "concept",
+        "record",
         "key",
         "report",
     ]:
@@ -92,6 +95,38 @@ def test_cli_end_to_end_default_report_key(tmp_path: Path) -> None:
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.sig").exists()
     assert (tmp_path / "proof_packet" / "signatures" / "manifest.pub").exists()
     assert (tmp_path / "keys" / "report_signing_key.pem").exists()
+
+
+def test_report_command_dependency_import_error_is_bounded(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from tohupono import cli
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
+        if name == "tohupono.reporting.pro_report":
+            raise ImportError("blocked report dependency with hostile details")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    result = cli.run(
+        [
+            "report",
+            "--proof",
+            str(tmp_path / "proof_packet" / "manifest.json"),
+            "--output",
+            str(tmp_path / "verification_report.pdf"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "report generation dependencies are unavailable" in captured.err
+    assert "hostile details" not in captured.err
+
 
 def test_verify_json_missing_file_error_shape(tmp_path: Path) -> None:
     sample = tmp_path / "source.txt"
@@ -197,13 +232,13 @@ def test_audit_surfaces_manifest_key_compromise_warning(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "WARN: compromise metadata exists for the manifest key purpose." in result.stdout
 
-def test_audit_key_workspace_reads_supplied_lifecycle_metadata(tmp_path: Path) -> None:
+def test_audit_key_directory_reads_supplied_lifecycle_metadata(tmp_path: Path) -> None:
     sample = tmp_path / "source.txt"
-    sample.write_text("audit workspace warning\n", encoding="utf-8")
+    sample.write_text("audit key directory warning\n", encoding="utf-8")
     proof_dir = tmp_path / "proof_packet"
-    key_workspace = tmp_path / "workspace_keys"
+    key_directory = tmp_path / "local_keys"
     create_proof_packet(sample, proof_dir)
-    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_workspace), "--json")
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_directory), "--json")
     assert created.returncode == 0, created.stderr
     compromised = run_cli(
         "key",
@@ -211,24 +246,24 @@ def test_audit_key_workspace_reads_supplied_lifecycle_metadata(tmp_path: Path) -
         "--purpose",
         "manifest",
         "--reason",
-        "audit workspace warning test",
+        "audit key directory warning test",
         "--output-dir",
-        str(key_workspace),
+        str(key_directory),
         "--json",
     )
     assert compromised.returncode == 0, compromised.stderr
-    result = run_cli("audit", str(proof_dir), "--key-workspace", str(key_workspace))
+    result = run_cli("audit", str(proof_dir), "--key-directory", str(key_directory))
     assert result.returncode == 0
     assert "WARN: compromise metadata exists for the manifest key purpose." in result.stdout
     assert "BEGIN PRIVATE KEY" not in result.stdout
 
-def test_audit_key_workspace_json_includes_lifecycle_summary(tmp_path: Path) -> None:
+def test_audit_key_directory_json_includes_lifecycle_summary(tmp_path: Path) -> None:
     sample = tmp_path / "source.txt"
-    sample.write_text("audit workspace json\n", encoding="utf-8")
+    sample.write_text("audit key directory json\n", encoding="utf-8")
     proof_dir = tmp_path / "proof_packet"
-    key_workspace = tmp_path / "workspace_keys"
+    key_directory = tmp_path / "local_keys"
     create_proof_packet(sample, proof_dir)
-    assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_workspace), "--json").returncode == 0
+    assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_directory), "--json").returncode == 0
     assert (
         run_cli(
             "key",
@@ -238,7 +273,7 @@ def test_audit_key_workspace_json_includes_lifecycle_summary(tmp_path: Path) -> 
             "--reason",
             "audit json rotation",
             "--output-dir",
-            str(key_workspace),
+            str(key_directory),
             "--json",
         ).returncode
         == 0
@@ -252,21 +287,22 @@ def test_audit_key_workspace_json_includes_lifecycle_summary(tmp_path: Path) -> 
             "--reason",
             "audit json compromise",
             "--output-dir",
-            str(key_workspace),
+            str(key_directory),
             "--json",
         ).returncode
         == 0
     )
-    result = run_cli("audit", str(proof_dir), "--key-workspace", str(key_workspace), "--json")
+    result = run_cli("audit", str(proof_dir), "--key-directory", str(key_directory), "--json")
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
-    assert data["key_workspace"] == str(key_workspace)
+    assert data["key_directory"] == str(key_directory)
     assert data["key_lifecycle"]["manifest"]["rotation_events"] == 1
     assert data["key_lifecycle"]["manifest"]["compromise_events"] == 1
     assert data["key_warnings"]
     assert data["status"] == "warn"
 
-def test_audit_help_includes_key_workspace() -> None:
+def test_audit_help_includes_key_directory() -> None:
     result = run_cli("audit", "--help")
     assert result.returncode == 0, result.stderr
-    assert "--key-workspace" in result.stdout
+    assert "--key-directory" in result.stdout
+    assert "--key-workspace" not in result.stdout

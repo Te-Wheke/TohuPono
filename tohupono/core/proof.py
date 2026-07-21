@@ -2,15 +2,65 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import stat
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from tohupono import __version__
+from tohupono.concepts.execution import (
+    build_proof_concepts_declaration,
+    evaluate_declared_concepts,
+    proof_concept_seed,
+    validate_requested_concepts,
+)
 from tohupono.core.canonical_json import canonical_json_bytes, canonical_json_text
 from tohupono.core.file_identity import FileIdentity, inspect_file
+from tohupono.custody.validation import build_custody_chain, load_custody_descriptor
+from tohupono.identity.validation import (
+    build_identity_assertion,
+    build_identity_collection,
+    identity_assertion_ids_from_collection,
+    load_identity_descriptor,
+)
+from tohupono.provenance.validation import (
+    build_provenance_collection,
+    build_provenance_edge,
+    load_provenance_descriptor,
+    provenance_edge_ids_from_collection,
+)
+from tohupono.records.model import RecordEnvelope
+from tohupono.records.validation import (
+    build_record_collection,
+    build_record_envelope,
+    load_record_descriptor,
+    record_ids_from_collection,
+)
+from tohupono.timestamping.model import (
+    DEFAULT_TIMESTAMP_POLICY,
+    LOCAL_TIMESTAMP_WARNING,
+    MISSING_TIMESTAMP_WARNING,
+    TIMESTAMP_POLICIES,
+    TIMESTAMP_RECEIPT_STATUSES,
+    TIMESTAMP_RECEIPT_TYPES,
+    UNVERIFIED_RECEIPT_WARNING,
+    TimestampReceipt,
+    TimestampReceiptConflictError,
+    inspect_manifest_timestamping,
+    local_timestamp_proof,
+    make_receipt_id,
+)
+from tohupono.transaction.validation import (
+    build_transaction_collection,
+    build_transaction_envelope,
+    load_transaction_descriptor,
+    transaction_ids_from_collection,
+)
+from tohupono.security.limits import MAX_RECEIPT_BYTES, MAX_RECEIPT_METADATA_BYTES
+from tohupono.security.paths import safe_child_path
 from tohupono.trust.keys import (
     DEFAULT_MANIFEST_KEY,
     DEFAULT_MANIFEST_PUBLIC_KEY,
@@ -19,7 +69,7 @@ from tohupono.trust.keys import (
 )
 
 SCHEMA_VERSION = "tohupono.proof_manifest.v0.1"
-MANIFEST_VERSION = "0.4.0"
+MANIFEST_VERSION = "0.5.0"
 GENESIS_EVENT_HASH = "GENESIS"
 CHAIN_STATUS_VALID = "valid"
 CHAIN_STATUS_MISSING = "missing"
@@ -38,7 +88,14 @@ class ProofManifest:
     tool: dict[str, str]
     file: dict[str, object]
     claims: list[dict[str, object]]
+    proof_concepts: dict[str, object]
+    records: dict[str, object] | None
+    custody: dict[str, object] | None
+    identities: dict[str, object] | None
+    provenance: dict[str, object] | None
+    transactions: dict[str, object] | None
     evidence: dict[str, list[dict[str, object]]]
+    timestamping: dict[str, object]
     trust_policy: dict[str, str]
     warnings: list[str]
     community: bool
@@ -52,8 +109,18 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def proof_id_seed(identity: FileIdentity, sealed_at_utc: str) -> dict[str, object]:
-    return {
+def proof_id_seed(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+    records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
+    provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
+) -> dict[str, object]:
+    concepts = validate_requested_concepts(list(concept_ids)) if concept_ids is not None else ()
+    seed = {
         "file_id": identity.sha256,
         "file_sha256": identity.sha256,
         "file_size": identity.size_bytes,
@@ -61,10 +128,57 @@ def proof_id_seed(identity: FileIdentity, sealed_at_utc: str) -> dict[str, objec
         "schema_version": SCHEMA_VERSION,
         "tool_version": __version__,
     }
+    if concepts:
+        seed["proof_concepts"] = proof_concept_seed(concepts)
+    if records is not None:
+        seed["records"] = {
+            "record_ids": record_ids_from_collection(records),
+            "schema_version": records.get("schema_version"),
+        }
+    if custody is not None:
+        events = custody.get("events") if isinstance(custody, dict) else None
+        seed["custody"] = {
+            "chain_head": custody.get("chain_head") if isinstance(custody, dict) else None,
+            "event_ids": [
+                str(item["event_id"])
+                for item in events
+                if isinstance(events, list) and isinstance(item, dict) and isinstance(item.get("event_id"), str)
+            ]
+            if isinstance(events, list)
+            else [],
+            "schema_version": custody.get("schema_version") if isinstance(custody, dict) else None,
+        }
+    if identities is not None:
+        seed["identities"] = {
+            "assertion_ids": identity_assertion_ids_from_collection(identities),
+            "schema_version": identities.get("schema_version") if isinstance(identities, dict) else None,
+        }
+    if provenance is not None:
+        seed["provenance"] = {
+            "edge_ids": provenance_edge_ids_from_collection(provenance),
+            "schema_version": provenance.get("schema_version") if isinstance(provenance, dict) else None,
+        }
+    if transactions is not None:
+        seed["transactions"] = {
+            "schema_version": transactions.get("schema_version") if isinstance(transactions, dict) else None,
+            "transaction_ids": transaction_ids_from_collection(transactions),
+        }
+    return seed
 
 
-def make_proof_id(identity: FileIdentity, sealed_at_utc: str) -> str:
-    digest = hashlib.sha256(canonical_json_bytes(proof_id_seed(identity, sealed_at_utc))).hexdigest()
+def make_proof_id(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+    records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
+    provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
+) -> str:
+    digest = hashlib.sha256(
+        canonical_json_bytes(proof_id_seed(identity, sealed_at_utc, concept_ids, records, custody, identities, provenance, transactions))
+    ).hexdigest()
     return f"tp_{digest[:32]}"
 
 
@@ -183,15 +297,26 @@ def evidence_chain_diagnostics(path: Path) -> dict[str, object]:
     }
 
 
-def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
+def build_manifest(
+    identity: FileIdentity,
+    sealed_at_utc: str,
+    concept_ids: tuple[str, ...] | None = None,
+    records: dict[str, object] | None = None,
+    custody: dict[str, object] | None = None,
+    identities: dict[str, object] | None = None,
+    provenance: dict[str, object] | None = None,
+    transactions: dict[str, object] | None = None,
+) -> ProofManifest:
+    selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
     warnings: list[str] = []
     if identity.blake3 is None:
         warnings.append("BLAKE3 unavailable; optional BLAKE3 digest was not recorded.")
+    proof_id = make_proof_id(identity, sealed_at_utc, selected_concepts, records, custody, identities, provenance, transactions)
 
     return ProofManifest(
         schema_version=SCHEMA_VERSION,
         manifest_version=MANIFEST_VERSION,
-        proof_id=make_proof_id(identity, sealed_at_utc),
+        proof_id=proof_id,
         sealed_at_utc=sealed_at_utc,
         tool={"name": "tohupono", "version": __version__},
         file=identity.to_dict(),
@@ -204,6 +329,12 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
                 "evidence_refs": [],
             }
         ],
+        proof_concepts=build_proof_concepts_declaration(identity.sha256, selected_concepts, records, custody, provenance, transactions, identities),
+        records=records,
+        custody=custody,
+        identities=identities,
+        provenance=provenance,
+        transactions=transactions,
         evidence={
             "hashes": [],
             "timestamps": [],
@@ -212,18 +343,87 @@ def build_manifest(identity: FileIdentity, sealed_at_utc: str) -> ProofManifest:
             "transparency_logs": [],
             "custody_events": [],
         },
+        timestamping={},
         trust_policy={"policy_id": "local_default", "policy_digest": "unconfigured"},
         warnings=warnings,
         community=False,
         identifiers={
             "file_id": identity.sha256,
-            "proof_id": make_proof_id(identity, sealed_at_utc),
+            "proof_id": proof_id,
         },
     )
 
 
 def write_json(path: Path, value: Any) -> None:
     path.write_text(canonical_json_text(value) + "\n", encoding="utf-8")
+
+
+def _read_regular_file_limited(path: Path, *, max_bytes: int, label: str) -> bytes:
+    try:
+        before = path.lstat()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(str(path)) from exc
+    if stat.S_ISLNK(before.st_mode):
+        raise ValueError(f"{label} must not be a symlink.")
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"{label} must be a regular file.")
+    if before.st_size > max_bytes:
+        raise ValueError(f"{label} exceeds configured size limit.")
+
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError(f"{label} must be a regular file.")
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError(f"{label} changed during read.")
+        if opened.st_size > max_bytes:
+            raise ValueError(f"{label} exceeds configured size limit.")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while True:
+            chunk = os.read(fd, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+            if remaining <= 0:
+                raise ValueError(f"{label} exceeds configured size limit.")
+        after = os.fstat(fd)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ValueError(f"{label} changed during read.")
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    if len(data) > max_bytes:
+        raise ValueError(f"{label} exceeds configured size limit.")
+    return data
+
+
+def _write_new_regular_file_no_follow(path: Path, data: bytes, *, label: str) -> None:
+    if path.exists() or path.is_symlink():
+        raise TimestampReceiptConflictError(f"Refusing to overwrite existing {label}.")
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        written = 0
+        while written < len(data):
+            written += os.write(fd, data[written:])
+    finally:
+        os.close(fd)
 
 
 def sha256_text(value: bytes) -> str:
@@ -233,6 +433,7 @@ def sha256_text(value: bytes) -> str:
 def canonical_manifest_for_id(manifest: dict[str, Any]) -> dict[str, Any]:
     normalized = json.loads(canonical_json_text(manifest))
     normalized.pop("signatures", None)
+    normalized.pop("timestamping", None)
     identifiers = normalized.get("identifiers")
     if isinstance(identifiers, dict):
         identifiers.pop("manifest_id", None)
@@ -273,6 +474,10 @@ def packet_dir(packet: Path) -> Path:
     return manifest.parent
 
 
+def timestamp_receipts_dir(packet: Path) -> Path:
+    return packet_dir(packet) / "timestamp_receipts"
+
+
 def _assert_can_create_packet(output: Path) -> None:
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"Refusing to overwrite existing proof packet: {output}")
@@ -285,15 +490,112 @@ def create_proof_packet(
     manifest_key: Path = DEFAULT_MANIFEST_KEY,
     manifest_public_key: Path = DEFAULT_MANIFEST_PUBLIC_KEY,
     sealed_at_utc: str | None = None,
+    concept_ids: list[str] | tuple[str, ...] | None = None,
+    record_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    custody_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    provenance_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    transaction_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
+    identity_descriptor_paths: list[Path] | tuple[Path, ...] | None = None,
 ) -> ProofManifest:
     identity = inspect_file(source)
     sealed_at = sealed_at_utc or utc_now_iso()
-    manifest = build_manifest(identity, sealed_at)
+    selected_concepts = validate_requested_concepts(list(concept_ids) if concept_ids is not None else None)
+    record_paths = list(record_descriptor_paths or [])
+    if "records" in selected_concepts and not record_paths:
+        raise ValueError("Proof of Records requires at least one --record-json descriptor.")
+    if record_paths and "records" not in selected_concepts:
+        raise ValueError("--record-json requires selecting --concept records.")
+    custody_paths = list(custody_descriptor_paths or [])
+    if "custody" in selected_concepts and not custody_paths:
+        raise ValueError("Proof of Custody requires at least one --custody-json descriptor.")
+    if custody_paths and "custody" not in selected_concepts:
+        raise ValueError("--custody-json requires selecting --concept custody.")
+    identity_paths = list(identity_descriptor_paths or [])
+    if "identity" in selected_concepts and not identity_paths:
+        raise ValueError("Proof of Identity requires at least one --identity-json descriptor.")
+    if identity_paths and "identity" not in selected_concepts:
+        raise ValueError("--identity-json requires selecting --concept identity.")
+    provenance_paths = list(provenance_descriptor_paths or [])
+    if "provenance" in selected_concepts and not provenance_paths:
+        raise ValueError("Proof of Provenance requires at least one --provenance-json descriptor.")
+    if provenance_paths and "provenance" not in selected_concepts:
+        raise ValueError("--provenance-json requires selecting --concept provenance.")
+    transaction_paths = list(transaction_descriptor_paths or [])
+    if "transaction" in selected_concepts and not transaction_paths:
+        raise ValueError("Proof of Transaction requires at least one --transaction-json descriptor.")
+    if transaction_paths and "transaction" not in selected_concepts:
+        raise ValueError("--transaction-json requires selecting --concept transaction.")
+    record_collection: dict[str, object] | None = None
+    if record_paths:
+        envelopes: list[RecordEnvelope] = []
+        for descriptor_path in record_paths:
+            descriptor = load_record_descriptor(descriptor_path)
+            envelopes.append(
+                build_record_envelope(
+                    descriptor,
+                    subject_algorithm="sha256",
+                    subject_digest=identity.sha256,
+                )
+            )
+        record_collection = build_record_collection(envelopes)
+    custody_collection: dict[str, object] | None = None
+    if custody_paths:
+        descriptors = [load_custody_descriptor(descriptor_path) for descriptor_path in custody_paths]
+        custody_collection = build_custody_chain(
+            descriptors,
+            subject_algorithm="sha256",
+            subject_digest=identity.sha256,
+        )
+    identity_collection: dict[str, object] | None = None
+    if identity_paths:
+        assertions = [
+            build_identity_assertion(
+                load_identity_descriptor(descriptor_path),
+                subject_algorithm="sha256",
+                subject_digest=identity.sha256,
+            )
+            for descriptor_path in identity_paths
+        ]
+        identity_collection = build_identity_collection(assertions)
+    provenance_collection: dict[str, object] | None = None
+    if provenance_paths:
+        edges = [
+            build_provenance_edge(
+                load_provenance_descriptor(descriptor_path),
+                child_algorithm="sha256",
+                child_digest=identity.sha256,
+            )
+            for descriptor_path in provenance_paths
+        ]
+        provenance_collection = build_provenance_collection(edges)
+    transaction_collection: dict[str, object] | None = None
+    if transaction_paths:
+        transactions = [
+            build_transaction_envelope(
+                load_transaction_descriptor(descriptor_path),
+                subject_algorithm="sha256",
+                subject_digest=identity.sha256,
+            )
+            for descriptor_path in transaction_paths
+        ]
+        transaction_collection = build_transaction_collection(transactions)
+    manifest = build_manifest(identity, sealed_at, selected_concepts, record_collection, custody_collection, identity_collection, provenance_collection, transaction_collection)
     _assert_can_create_packet(output)
     output.mkdir(parents=True, exist_ok=True)
 
     manifest_path = output / "manifest.json"
     manifest_dict = manifest.to_dict()
+    if manifest_dict.get("records") is None:
+        manifest_dict.pop("records", None)
+    if manifest_dict.get("custody") is None:
+        manifest_dict.pop("custody", None)
+    if manifest_dict.get("identities") is None:
+        manifest_dict.pop("identities", None)
+    if manifest_dict.get("provenance") is None:
+        manifest_dict.pop("provenance", None)
+    if manifest_dict.get("transactions") is None:
+        manifest_dict.pop("transactions", None)
+    manifest_dict["timestamping"] = local_timestamp_proof(identity.sha256, sealed_at).to_dict()
     sealed_event = build_evidence_event(
         event_type="sealed",
         timestamp=sealed_at,
@@ -343,10 +645,313 @@ def create_proof_packet(
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = _read_regular_file_limited(
+        path,
+        max_bytes=MAX_RECEIPT_METADATA_BYTES * 4,
+        label="Structured proof input",
+    )
+    try:
+        return json.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("Structured proof input must be UTF-8 JSON.") from exc
 
 
-def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[str, Any]:
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def list_timestamp_receipts(packet: Path) -> list[dict[str, object]]:
+    receipts_dir = timestamp_receipts_dir(packet)
+    if not receipts_dir.exists():
+        return []
+    if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+        return [
+            {
+                "receipt_id": "timestamp_receipts",
+                "receipt_status": "invalid",
+                "warnings": ["Timestamp receipt directory is unsafe."],
+            }
+        ]
+    receipts: list[dict[str, object]] = []
+    for receipt_path in sorted(receipts_dir.glob("receipt_*.json")):
+        try:
+            receipt = load_manifest(receipt_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            receipts.append(
+                {
+                    "receipt_id": receipt_path.stem.removeprefix("receipt_"),
+                    "receipt_path": str(receipt_path),
+                    "receipt_status": "invalid",
+                    "warnings": ["Timestamp receipt metadata could not be read."],
+                }
+            )
+            continue
+        if isinstance(receipt, dict):
+            receipts.append(receipt)
+    return receipts
+
+
+def _resolve_stored_receipt_path(proof_dir: Path, receipt_path_value: object) -> Path:
+    if not isinstance(receipt_path_value, str) or not receipt_path_value:
+        raise ValueError("timestamp receipt path is empty")
+    raw = Path(receipt_path_value)
+    if raw.is_absolute():
+        raise ValueError("timestamp receipt path must be relative")
+    if any(part in {"", ".."} for part in raw.parts):
+        raise ValueError("timestamp receipt path contains traversal")
+
+    receipts_root = proof_dir / "timestamp_receipts"
+    if receipts_root.exists() and receipts_root.is_symlink():
+        raise ValueError("timestamp receipt directory must not be a symlink")
+
+    raw_parts = raw.parts
+    if raw_parts and raw_parts[0] == "timestamp_receipts":
+        raw = Path(*raw_parts[1:]) if len(raw_parts) > 1 else Path("")
+    if not raw.parts:
+        raise ValueError("timestamp receipt path is empty")
+
+    receipts_root_resolved = receipts_root.resolve(strict=False)
+    receipt_path = safe_child_path(receipts_root, raw)
+    current = receipts_root
+    for part in receipt_path.relative_to(receipts_root_resolved).parts[:-1]:
+        current = current / part
+        if current.exists() and current.is_symlink():
+            raise ValueError("timestamp receipt path contains a symlinked parent")
+    if receipt_path.exists() and receipt_path.is_symlink():
+        raise ValueError("timestamp receipt file must not be a symlink")
+    return receipt_path
+
+
+def import_timestamp_receipt(packet: Path, receipt_file: Path, receipt_type: str = "manual") -> dict[str, object]:
+    if receipt_type not in TIMESTAMP_RECEIPT_TYPES:
+        raise ValueError(f"Unsupported timestamp receipt type: {receipt_type}")
+    manifest_path = resolve_packet_manifest(packet)
+    manifest = load_manifest(manifest_path)
+    file_info = manifest.get("file", {})
+    if not isinstance(file_info, dict) or not file_info.get("sha256"):
+        raise ValueError("Proof manifest does not contain a target file digest.")
+    receipt_bytes = _read_regular_file_limited(
+        receipt_file,
+        max_bytes=MAX_RECEIPT_BYTES,
+        label="Timestamp receipt",
+    )
+
+    target_digest = str(file_info["sha256"])
+    receipt_sha256 = hashlib.sha256(receipt_bytes).hexdigest()
+    receipt_size = len(receipt_bytes)
+    receipt_id = make_receipt_id(
+        receipt_type=receipt_type,
+        receipt_sha256=receipt_sha256,
+        receipt_size=receipt_size,
+        target_digest=target_digest,
+    )
+    receipts_dir = manifest_path.parent / "timestamp_receipts"
+    receipt_metadata_path = receipts_dir / f"receipt_{receipt_id}.json"
+    stored_receipt_path = receipts_dir / f"receipt_{receipt_id}.bin"
+    if receipts_dir.exists():
+        if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+            raise ValueError("Timestamp receipt directory is unsafe.")
+    else:
+        receipts_dir.mkdir(exist_ok=False)
+    if receipts_dir.is_symlink() or not receipts_dir.is_dir():
+        raise ValueError("Timestamp receipt directory is unsafe.")
+    if receipt_metadata_path.exists() or receipt_metadata_path.is_symlink() or stored_receipt_path.exists() or stored_receipt_path.is_symlink():
+        raise TimestampReceiptConflictError("Refusing to overwrite existing timestamp receipt import.")
+
+    _write_new_regular_file_no_follow(stored_receipt_path, receipt_bytes, label="timestamp receipt import")
+    adapter_type = receipt_type if receipt_type in {"manual", "opentimestamps", "rfc3161"} else "none"
+    record = TimestampReceipt(
+        receipt_id=receipt_id,
+        receipt_type=receipt_type,  # type: ignore[arg-type]
+        receipt_path=str(stored_receipt_path.relative_to(manifest_path.parent)),
+        receipt_sha256=receipt_sha256,
+        receipt_size=receipt_size,
+        receipt_format=receipt_file.suffix.lower().lstrip(".") or "unknown",
+        receipt_status="unverified",
+        adapter_type=adapter_type,  # type: ignore[arg-type]
+        target_digest=target_digest,
+        imported_at=utc_now_iso(),
+        warnings=[UNVERIFIED_RECEIPT_WARNING],
+    ).to_dict()
+    _write_new_regular_file_no_follow(
+        receipt_metadata_path,
+        canonical_json_bytes(record) + b"\n",
+        label="timestamp receipt metadata",
+    )
+    return {
+        "receipt": record,
+        "receipt_metadata_path": str(receipt_metadata_path),
+        "stored_receipt_path": str(stored_receipt_path),
+        "status": "ok",
+    }
+
+
+def timestamp_verification_diagnostics(
+    packet: Path,
+    policy: str = DEFAULT_TIMESTAMP_POLICY,
+) -> dict[str, Any]:
+    if policy not in TIMESTAMP_POLICIES:
+        raise ValueError(f"Unsupported timestamp policy: {policy}")
+    manifest_path = resolve_packet_manifest(packet)
+    proof_dir = manifest_path.parent
+    manifest = load_manifest(manifest_path)
+    file_info = manifest.get("file", {})
+    if not isinstance(file_info, dict) or not file_info.get("sha256"):
+        raise ValueError("Proof manifest does not contain a target file digest.")
+    manifest_digest = str(file_info["sha256"])
+    timestamping = inspect_manifest_timestamping(manifest)
+    timestamp_status = str(timestamping.get("status", "missing"))
+    warnings: list[str] = []
+    failures: list[str] = []
+    checks: list[dict[str, str]] = []
+
+    if timestamp_status == "anchored":
+        failures.append("timestamp_anchored_unverified")
+        checks.append(
+            {
+                "status": "FAIL",
+                "message": "manifest-declared anchored timestamp is not externally verified by TohuPono.",
+            }
+        )
+    elif timestamp_status == "local_only":
+        message = "timestamp is local-only and not externally anchored."
+        if policy == "strict_external":
+            failures.append("timestamp_local_only")
+            checks.append({"status": "FAIL", "message": message})
+        else:
+            warnings.append(LOCAL_TIMESTAMP_WARNING)
+            checks.append({"status": "WARN", "message": message})
+    elif timestamp_status == "missing":
+        message = "no timestamp proof is present."
+        if policy == "strict_external":
+            failures.append("timestamp_missing")
+            checks.append({"status": "FAIL", "message": message})
+        else:
+            warnings.append(MISSING_TIMESTAMP_WARNING)
+            checks.append({"status": "WARN", "message": message})
+    else:
+        message = f"Timestamp status is {timestamp_status}."
+        failures.append(f"timestamp_{timestamp_status}")
+        checks.append({"status": "FAIL", "message": message})
+
+    receipts = list_timestamp_receipts(manifest_path)
+    seen_receipt_ids: set[str] = set()
+    verified_external_receipt = False
+    required_fields = {
+        "adapter_type",
+        "imported_at",
+        "receipt_id",
+        "receipt_path",
+        "receipt_sha256",
+        "receipt_size",
+        "receipt_status",
+        "receipt_type",
+        "target_digest",
+    }
+    for index, receipt in enumerate(receipts, start=1):
+        receipt_id = str(receipt.get("receipt_id") or f"receipt_{index}")
+        missing = sorted(required_fields - set(receipt))
+        if missing:
+            failures.append(f"{receipt_id}_metadata_missing_fields")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": f"timestamp receipt metadata missing required fields: {', '.join(missing)}.",
+                }
+            )
+            continue
+        if receipt_id in seen_receipt_ids:
+            failures.append("timestamp_receipt_duplicate_id")
+            checks.append({"status": "FAIL", "message": "duplicate timestamp receipt_id detected."})
+        seen_receipt_ids.add(receipt_id)
+        if receipt.get("receipt_type") not in TIMESTAMP_RECEIPT_TYPES:
+            failures.append(f"{receipt_id}_unsupported_receipt_type")
+            checks.append({"status": "FAIL", "message": "unsupported timestamp receipt type."})
+        if receipt.get("receipt_status") not in TIMESTAMP_RECEIPT_STATUSES:
+            failures.append(f"{receipt_id}_invalid_receipt_status")
+            checks.append({"status": "FAIL", "message": "timestamp receipt status is invalid."})
+        if str(receipt.get("target_digest")) != manifest_digest:
+            failures.append(f"{receipt_id}_target_digest_mismatch")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": "timestamp receipt target digest does not match packet manifest digest.",
+                }
+            )
+        try:
+            receipt_path = _resolve_stored_receipt_path(proof_dir, receipt.get("receipt_path"))
+        except ValueError:
+            failures.append(f"{receipt_id}_stored_file_path_invalid")
+            checks.append({"status": "FAIL", "message": "timestamp receipt path is invalid or escapes packet storage."})
+            continue
+        if not receipt_path.exists():
+            failures.append(f"{receipt_id}_stored_file_missing")
+            checks.append({"status": "FAIL", "message": "timestamp receipt file is missing from packet storage."})
+        else:
+            try:
+                receipt_bytes = _read_regular_file_limited(
+                    receipt_path,
+                    max_bytes=MAX_RECEIPT_BYTES,
+                    label="Stored timestamp receipt",
+                )
+            except ValueError as exc:
+                message = str(exc)
+                if "size limit" in message:
+                    failures.append(f"{receipt_id}_stored_file_too_large")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt file exceeds configured size limit."})
+                elif "symlink" in message:
+                    failures.append(f"{receipt_id}_stored_file_path_invalid")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt path is invalid or escapes packet storage."})
+                else:
+                    failures.append(f"{receipt_id}_stored_file_not_regular")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt file is not a regular file."})
+                continue
+            actual_sha256 = hashlib.sha256(receipt_bytes).hexdigest()
+            if str(receipt.get("receipt_sha256")) != actual_sha256:
+                failures.append(f"{receipt_id}_sha256_mismatch")
+                checks.append({"status": "FAIL", "message": "timestamp receipt SHA-256 does not match stored bytes."})
+        if receipt.get("receipt_status") == "verified":
+            failures.append(f"{receipt_id}_verified_receipt_untrusted")
+            checks.append(
+                {
+                    "status": "FAIL",
+                    "message": "timestamp receipt metadata claims verified status without local adapter verification.",
+                }
+            )
+        elif receipt.get("receipt_status") == "unverified":
+            message = "imported timestamp receipt is present but not externally verified by TohuPono."
+            if policy == "strict_external":
+                failures.append(f"{receipt_id}_unverified_under_strict_external")
+                checks.append({"status": "FAIL", "message": message})
+            else:
+                warnings.append(UNVERIFIED_RECEIPT_WARNING)
+                checks.append({"status": "WARN", "message": message})
+
+    if policy == "strict_external" and not verified_external_receipt:
+        failures.append("strict_external_timestamp_missing")
+        checks.append({"status": "FAIL", "message": "strict_external policy requires a verified external timestamp."})
+
+    status = "fail" if failures else ("warn" if warnings else "pass")
+    return {
+        "checks": checks,
+        "failure_count": len(failures),
+        "failures": failures,
+        "policy": policy,
+        "receipt_count": len(receipts),
+        "receipts": receipts,
+        "status": status,
+        "timestamping": timestamping,
+        "timestamping_status": timestamp_status,
+        "warning_count": len(warnings),
+        "warnings": warnings,
+    }
+
+
+def packet_diagnostics(packet: Path, key_directory: Path | None = None) -> dict[str, Any]:
     manifest_path = resolve_packet_manifest(packet)
     proof_dir = manifest_path.parent
     checks: list[dict[str, str]] = []
@@ -435,7 +1040,7 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
     key_lifecycle: dict[str, object] = {}
     key_warnings: list[str] = []
     for purpose in ["manifest", "report", "amendment"]:
-        lifecycle = key_lifecycle_summary(purpose, key_workspace)
+        lifecycle = key_lifecycle_summary(purpose, key_directory)
         key_lifecycle[purpose] = {
             "compromise_events": lifecycle.get("compromise_events", 0),
             "latest_compromise_event_id": lifecycle.get("latest_compromise_event_id"),
@@ -451,20 +1056,49 @@ def packet_diagnostics(packet: Path, key_workspace: Path | None = None) -> dict[
             key_warnings.append(message)
             warnings.append(f"{purpose}_key_compromise_review")
 
-    checks.append({"status": "WARN", "message": "timestamp is local-only and not externally anchored."})
-    warnings.append("timestamp_local_only")
+    timestamp_diagnostics = timestamp_verification_diagnostics(manifest_path, DEFAULT_TIMESTAMP_POLICY)
+    checks.extend(
+        {"status": str(check.get("status")), "message": str(check.get("message"))}
+        for check in timestamp_diagnostics.get("checks", [])
+        if isinstance(check, dict)
+    )
+    failures.extend(str(failure) for failure in timestamp_diagnostics.get("failures", []))
+    warnings.extend(str(warning) for warning in timestamp_diagnostics.get("warnings", []))
+    concept_diagnostics = evaluate_declared_concepts(manifest_path, manifest)
+    legacy_warning = concept_diagnostics.get("legacy_warning")
+    if legacy_warning:
+        checks.append({"status": "WARN", "message": str(legacy_warning)})
+        warnings.append("proof_concepts_absent")
+    for result in concept_diagnostics.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        concept_status = str(result.get("status"))
+        concept_id = str(result.get("concept_id"))
+        checks.append({"status": concept_status, "message": f"Proof Concept {concept_id}: {concept_status}."})
+        if concept_status == "FAIL":
+            failures.append(f"proof_concept_{concept_id}_failed")
+        elif concept_status == "WARN":
+            warnings.append(f"proof_concept_{concept_id}_warning")
     status = "fail" if failures else ("warn" if warnings else "pass")
     return {
         "checks": checks,
+        "declared_proof_concepts": concept_diagnostics.get("declared", []),
         "evidence_chain_status": chain["status"],
         "failures": failures,
+        "inferred_legacy_checks": concept_diagnostics.get("inferred_legacy_checks", []),
         "key_lifecycle": key_lifecycle,
         "key_warnings": key_warnings,
-        "key_workspace": str(key_workspace or Path("keys")),
+        "key_directory": str(key_directory or Path("keys")),
         "manifest_id": identifiers.get("manifest_id"),
         "packet_id": identifiers.get("packet_id"),
+        "proof_concept_results": concept_diagnostics.get("results", []),
+        "proof_concept_summary": concept_diagnostics.get("summary", {}),
         "report_signature_status": report_status,
         "status": status,
+        "timestamp_diagnostics": timestamp_diagnostics,
+        "timestamp_receipts": timestamp_diagnostics.get("receipts", []),
+        "timestamping": timestamp_diagnostics.get("timestamping"),
+        "timestamp_status": timestamp_diagnostics.get("timestamping_status"),
         "warnings": warnings,
     }
 

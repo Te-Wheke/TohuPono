@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.5.0 - 2026-07-21
+
+- Added modular Proof Concepts governance, registry inspection, deterministic concept claims, and executable verification for `integrity`, `existence`, `records`, `custody`, `provenance`, `transaction`, and `identity`.
+- Kept default Proof Concepts limited to `existence` and `integrity`; non-default concepts require explicit `--concept` selection and their descriptor flags.
+- Added strict descriptor parsing, canonical manifest sections, deterministic IDs, subject-digest binding, exact claim linkage, audit integration, report integration, validation CLI commands, and inspection CLI commands for Records, Custody, Provenance, Transaction, and Identity.
+- Preserved concept separation: Records, Custody, Provenance, Transaction, and Identity remain packet-internal declared metadata consistency checks and do not establish truth, authenticity, authorship, ownership, consent, authority, legal effect, payment, delivery, verified identity, external registration, or complete history.
+- Added timestamp adapter interfaces, `none` and `local` adapters, offline receipt import, receipt diagnostics, timestamp verification policies, and placeholder OpenTimestamps/RFC 3161 provider interfaces without network calls or external timestamp verification.
+- Hardened timestamp evidence handling so packet-controlled `anchored` or `verified` metadata cannot self-authorise external timestamp status; stored receipts use bounded regular-file reads, path containment, symlink rejection, and no-follow write protections.
+- Strengthened deterministic integrity by preserving canonical manifests, deterministic proof identifiers, manifest IDs, packet IDs, evidence-chain validation, deterministic claim ordering, copy/rename byte-digest semantics, and tamper detection.
+- Hardened malformed concept data handling with strict collection-level field validation for Records, Custody, Provenance, Transaction, and Identity, fail-closed claim linkage, duplicate detection, and reordered Records claim rejection.
+- Preserved the active key interface as `--key-directory` / `key_directory` and kept active `--key-workspace` / `key_workspace` use absent.
+- Preserved `create_proof_packet` positional compatibility by appending new descriptor parameters after existing Provenance and Transaction slots.
+- Added lazy report-renderer imports so CLI version/help and non-report commands start without eager ReportLab/Pillow loading, while report generation and detached report signatures remain supported.
+- Added project-authored no-macron validation, C1 control-character rejection, shared path/atomic/lock/bounded-input helpers, and key lifecycle hardening with legacy log compatibility.
+- Preserved v0.4.0 packet audit, report, proof-ID, manifest-signature, and report-signature compatibility.
+- Deferred non-blocking hardening: broader descriptor no-follow helper reuse, key lifecycle JSONL concurrency hardening, further human-output path sanitisation, and hostile-symlink hardening for `scripts/check_no_macrons.py`.
+
 ## v0.4.0 - 2026-07-10
 
 - Added key purpose registry entries for manifest, report, witness, amendment, release, and test purposes.
@@ -9,12 +26,12 @@
 - Added `tohupono key rotate` with JSONL rotation metadata and no old-key deletion.
 - Added `tohupono key compromise` with JSONL compromise metadata and warning propagation.
 - Added key lifecycle JSON output for rotation and compromise summaries.
-- Added `--output-dir` support to `key inspect` and `key check` for workspace-aware key diagnostics.
+- Added `--output-dir` support to `key inspect` and `key check` for key-directory diagnostics.
 - Added rotation metadata and compromise metadata records for local key lifecycle review.
 - Kept compromise warnings as `WARN`, not `FAIL`, so trust-policy review does not automatically destroy old proofs.
 - Added packet audit WARN output for local compromised-key metadata where visible.
-- Added `audit --key-workspace` to read key lifecycle metadata from an explicit workspace.
-- Added audit JSON key lifecycle fields for selected key workspaces.
+- Added `audit --key-directory` to read key lifecycle metadata from an explicit key directory.
+- Added audit JSON key lifecycle fields for selected key directories.
 - Added a v0.4.0 release checklist for key-management hardening gates.
 - Documented key management, key rotation, and key compromise handling.
 - Kept OpenSSL CLI Ed25519 signing and existing default key paths.

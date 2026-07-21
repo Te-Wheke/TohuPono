@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import ast
+import subprocess
 from pathlib import Path
 
+import pytest
+
+import tohupono.trust.keys as key_module
 from tohupono.trust.keys import COMPROMISE_WARNING, KEY_PURPOSES
 
 from tests.support import run_cli
@@ -100,6 +105,87 @@ def test_key_create_unknown_purpose_returns_input_error(tmp_path: Path) -> None:
     assert "invalid choice" in result.stderr
 
 
+def test_run_openssl_passes_finite_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["args"] = args
+        observed["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(key_module.subprocess, "run", fake_run)
+    key_module._run_openssl(["version"])
+    assert observed["timeout"] == key_module.OPENSSL_OPERATION_TIMEOUT_SECONDS
+
+
+def test_openssl_available_timeout_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs.get("timeout") == key_module.OPENSSL_PROBE_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(cmd=["openssl", "version"], timeout=key_module.OPENSSL_PROBE_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(key_module.subprocess, "run", fake_run)
+    assert key_module.openssl_available() is False
+    result = key_module.check_keys("manifest")
+    json.dumps(result)
+    assert result["openssl_available"] is False
+
+
+def test_run_openssl_timeout_raises_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=["openssl"], timeout=key_module.OPENSSL_OPERATION_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(key_module.subprocess, "run", fake_run)
+    with pytest.raises(key_module.KeyErrorWithAction, match="OpenSSL command timed out"):
+        key_module._run_openssl(["version"])
+
+
+def test_verify_signature_valid_invalid_and_timeout_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = key_module.create_key("manifest", output_dir=tmp_path)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    data = b"signature timeout regression"
+    signature = key_module.sign_bytes(private_key, data)
+    assert key_module.verify_signature(public_key, signature, data) is True
+    assert key_module.verify_signature(public_key, signature, b"changed") is False
+
+    observed: dict[str, object] = {}
+
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["timeout"] = kwargs.get("timeout")
+        raise subprocess.TimeoutExpired(cmd=["openssl"], timeout=key_module.OPENSSL_OPERATION_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(key_module.subprocess, "run", fake_run)
+    assert key_module.verify_signature(public_key, signature, data) is False
+    assert observed["timeout"] == key_module.OPENSSL_OPERATION_TIMEOUT_SECONDS
+
+
+def test_all_openssl_subprocess_calls_have_finite_timeout() -> None:
+    source = Path("tohupono/trust/keys.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    missing: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            continue
+        if not node.args:
+            continue
+        first_arg = node.args[0]
+        first_value = None
+        if isinstance(first_arg, ast.List) and first_arg.elts and isinstance(first_arg.elts[0], ast.Constant):
+            first_value = first_arg.elts[0].value
+        if first_value == "openssl" and not any(keyword.arg == "timeout" for keyword in node.keywords):
+            missing.append(node.lineno)
+    assert missing == []
+
+
 def test_key_rotate_records_metadata_and_keeps_old_keys(tmp_path: Path) -> None:
     key_dir = tmp_path / "keys"
     created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
@@ -128,8 +214,11 @@ def test_key_rotate_records_metadata_and_keeps_old_keys(tmp_path: Path) -> None:
     assert Path(data["new_public_key_path"]).exists()
     assert old_private.exists()
     assert old_public.exists()
-    assert old_private.read_bytes() == old_private_bytes
-    assert old_public.read_bytes() == old_public_bytes
+    assert old_private.read_bytes() != old_private_bytes
+    assert old_public.read_bytes() != old_public_bytes
+    assert Path(data["backup_private_key_path"]).read_bytes() == old_private_bytes
+    assert Path(data["backup_public_key_path"]).read_bytes() == old_public_bytes
+    assert data["event_type"] == "KEY_ROTATED"
     log_path = Path(data["rotation_log_path"])
     entry = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
     assert entry["event_type"] == "KEY_ROTATED"
@@ -205,8 +294,126 @@ def test_key_check_warns_when_compromise_metadata_exists(tmp_path: Path) -> None
     assert data["keys"][0]["compromise_events"] == 1
 
 
-def test_key_inspect_output_dir_reads_workspace_keys(tmp_path: Path) -> None:
-    key_dir = tmp_path / "workspace_keys"
+def test_key_create_force_records_replaced_and_retains_backup(tmp_path: Path) -> None:
+    key_dir = tmp_path / "keys"
+    created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
+    assert created.returncode == 0, created.stderr
+    old_private = Path(json.loads(created.stdout)["private_key_path"])
+    old_private_bytes = old_private.read_bytes()
+
+    replaced = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--force", "--json")
+    assert replaced.returncode == 0, replaced.stderr
+    data = json.loads(replaced.stdout)
+    assert data["event_type"] == "KEY_REPLACED"
+    assert old_private.read_bytes() != old_private_bytes
+    assert Path(data["backup_private_key_path"]).read_bytes() == old_private_bytes
+
+
+def test_key_create_force_lifecycle_failure_rolls_back_active_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key_dir = tmp_path / "keys"
+    created = key_module.create_key("manifest", output_dir=key_dir)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    old_private_bytes = private_key.read_bytes()
+    old_public_bytes = public_key.read_bytes()
+
+    def fail_append(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated lifecycle write failure")
+
+    monkeypatch.setattr(key_module, "_append_lifecycle_event", fail_append)
+    with pytest.raises(key_module.KeyErrorWithAction):
+        key_module.create_key("manifest", output_dir=key_dir, force=True)
+
+    assert private_key.read_bytes() == old_private_bytes
+    assert public_key.read_bytes() == old_public_bytes
+    assert list(key_dir.glob("*.incomplete.*"))
+
+
+def test_key_rotate_lifecycle_failure_rolls_back_active_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key_dir = tmp_path / "keys"
+    created = key_module.create_key("manifest", output_dir=key_dir)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    old_private_bytes = private_key.read_bytes()
+    old_public_bytes = public_key.read_bytes()
+
+    def fail_append(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated lifecycle write failure")
+
+    monkeypatch.setattr(key_module, "_append_lifecycle_event", fail_append)
+    with pytest.raises(key_module.KeyErrorWithAction):
+        key_module.rotate_key("manifest", "simulated failed rotation", output_dir=key_dir)
+
+    assert private_key.read_bytes() == old_private_bytes
+    assert public_key.read_bytes() == old_public_bytes
+    assert list(key_dir.glob("*.incomplete.*"))
+
+
+def test_key_replacement_private_generation_failure_preserves_active_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_dir = tmp_path / "keys"
+    created = key_module.create_key("manifest", output_dir=key_dir)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    old_private_bytes = private_key.read_bytes()
+    old_public_bytes = public_key.read_bytes()
+
+    def fail_openssl(*_args: object, **_kwargs: object) -> None:
+        raise key_module.KeyErrorWithAction("simulated private generation failure")
+
+    monkeypatch.setattr(key_module, "_run_openssl", fail_openssl)
+    with pytest.raises(key_module.KeyErrorWithAction):
+        key_module.create_key("manifest", output_dir=key_dir, force=True)
+
+    assert private_key.read_bytes() == old_private_bytes
+    assert public_key.read_bytes() == old_public_bytes
+
+
+def test_key_replacement_public_export_failure_preserves_active_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_dir = tmp_path / "keys"
+    created = key_module.create_key("manifest", output_dir=key_dir)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    old_private_bytes = private_key.read_bytes()
+    old_public_bytes = public_key.read_bytes()
+
+    def fail_export(*_args: object, **_kwargs: object) -> None:
+        raise key_module.KeyErrorWithAction("simulated public export failure")
+
+    monkeypatch.setattr(key_module, "export_public_key", fail_export)
+    with pytest.raises(key_module.KeyErrorWithAction):
+        key_module.create_key("manifest", output_dir=key_dir, force=True)
+
+    assert private_key.read_bytes() == old_private_bytes
+    assert public_key.read_bytes() == old_public_bytes
+
+
+def test_key_replacement_validation_failure_preserves_active_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_dir = tmp_path / "keys"
+    created = key_module.create_key("manifest", output_dir=key_dir)
+    private_key = Path(str(created["private_key_path"]))
+    public_key = Path(str(created["public_key_path"]))
+    old_private_bytes = private_key.read_bytes()
+    old_public_bytes = public_key.read_bytes()
+
+    def fail_validation(*_args: object, **_kwargs: object) -> None:
+        raise key_module.KeyErrorWithAction("simulated validation failure")
+
+    monkeypatch.setattr(key_module, "_validate_public_key", fail_validation)
+    with pytest.raises(key_module.KeyErrorWithAction):
+        key_module.create_key("manifest", output_dir=key_dir, force=True)
+
+    assert private_key.read_bytes() == old_private_bytes
+    assert public_key.read_bytes() == old_public_bytes
+
+
+def test_key_inspect_output_dir_reads_key_directory(tmp_path: Path) -> None:
+    key_dir = tmp_path / "local_keys"
     created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
     assert created.returncode == 0, created.stderr
 
@@ -223,7 +430,7 @@ def test_key_inspect_output_dir_reads_workspace_keys(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     item = data["keys"][0]
-    assert data["key_workspace"] == str(key_dir)
+    assert data["key_directory"] == str(key_dir)
     assert item["purpose"] == "manifest"
     assert item["private_key_path"] == str(key_dir / "manifest_signing_key.pem")
     assert item["public_key_path"] == str(key_dir / "manifest_signing_key.pub")
@@ -232,7 +439,7 @@ def test_key_inspect_output_dir_reads_workspace_keys(tmp_path: Path) -> None:
 
 
 def test_key_check_output_dir_reads_lifecycle_metadata(tmp_path: Path) -> None:
-    key_dir = tmp_path / "workspace_keys"
+    key_dir = tmp_path / "local_keys"
     created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
     assert created.returncode == 0, created.stderr
     rotated = run_cli(
@@ -241,7 +448,7 @@ def test_key_check_output_dir_reads_lifecycle_metadata(tmp_path: Path) -> None:
         "--purpose",
         "manifest",
         "--reason",
-        "workspace rotation",
+        "key directory rotation",
         "--output-dir",
         str(key_dir),
         "--json",
@@ -253,7 +460,7 @@ def test_key_check_output_dir_reads_lifecycle_metadata(tmp_path: Path) -> None:
         "--purpose",
         "manifest",
         "--reason",
-        "workspace compromise",
+        "key directory compromise",
         "--output-dir",
         str(key_dir),
         "--json",
@@ -272,7 +479,7 @@ def test_key_check_output_dir_reads_lifecycle_metadata(tmp_path: Path) -> None:
 
 
 def test_key_inspect_json_includes_lifecycle_counts(tmp_path: Path) -> None:
-    key_dir = tmp_path / "workspace_keys"
+    key_dir = tmp_path / "local_keys"
     assert run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json").returncode == 0
     assert (
         run_cli(
@@ -312,7 +519,7 @@ def test_key_inspect_json_includes_lifecycle_counts(tmp_path: Path) -> None:
 
 
 def test_key_inspect_output_dir_human_mode_does_not_print_private_key_contents(tmp_path: Path) -> None:
-    key_dir = tmp_path / "workspace_keys"
+    key_dir = tmp_path / "local_keys"
     created = run_cli("key", "create", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
     assert created.returncode == 0, created.stderr
     compromised = run_cli(
@@ -335,7 +542,7 @@ def test_key_inspect_output_dir_human_mode_does_not_print_private_key_contents(t
     assert "BEGIN PRIVATE KEY" not in result.stdout
 
 
-def test_key_inspect_output_dir_missing_workspace_is_sane(tmp_path: Path) -> None:
+def test_key_inspect_output_dir_missing_key_directory_is_sane(tmp_path: Path) -> None:
     key_dir = tmp_path / "missing_keys"
     result = run_cli("key", "inspect", "--purpose", "manifest", "--output-dir", str(key_dir), "--json")
     assert result.returncode == 0, result.stderr

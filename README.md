@@ -1,6 +1,6 @@
 # TohuPono
 
-TohuPono is a deterministic, local-first file-origin proof system. It records evidence about digital files and produces evidence-based verification outputs for a legal-support evidence bundle.
+TohuPono is a headless, deterministic, local-first proof protocol and proof engine organised around modular Proof Concepts. It records evidence about digital files and produces evidence-based verification outputs for legal-support evidence review.
 
 It verifies technical file identity, digest matches, packet integrity, observed metadata, and report signatures within the local proof model. It does not make unsupported claims about external truth.
 
@@ -19,6 +19,16 @@ tohupono verify ./file.pdf --proof proof_packet/manifest.json --output verificat
 tohupono verify ./file.pdf --proof proof_packet/manifest.json --json
 tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 tohupono inspect-proof proof_packet/manifest.json --json
+tohupono timestamp inspect proof_packet/
+tohupono timestamp inspect proof_packet/ --json
+tohupono timestamp import proof_packet/ ./receipt.bin --type manual
+tohupono timestamp verify proof_packet/ --json
+tohupono concept list
+tohupono concept inspect integrity --json
+tohupono prove ./file.pdf --concept integrity --concept existence --output proof_packet/
+tohupono prove ./file.pdf --concept records --record-json record.json --output proof_packet/
+tohupono record validate record.json
+tohupono record inspect proof_packet/ --json
 tohupono amend proof_packet/ --note "Custody note"
 tohupono audit proof_packet/
 tohupono key inspect
@@ -26,7 +36,7 @@ tohupono key check --json
 tohupono key create --purpose manifest
 tohupono key rotate --purpose manifest --reason "routine rotation"
 tohupono key compromise --purpose manifest --reason "suspected exposure"
-tohupono audit proof_packet/ --key-workspace keys/
+tohupono audit proof_packet/ --key-directory keys/
 tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 tohupono report --proof proof_packet/manifest.json --format pdf --output community_report.pdf --community
 ```
@@ -66,17 +76,78 @@ python -m tohupono key compromise --purpose manifest --reason "suspected exposur
 
 Key creation refuses to overwrite existing key files unless `--force` is supplied. Rotation records local JSONL metadata and creates replacement key material without deleting old keys. Compromise marking records local JSONL metadata and causes inspection/check commands to warn that signatures may need trust-policy review.
 
-A key workspace is the directory containing purpose key files plus `key_rotation_log.jsonl` and `key_compromise_log.jsonl`. The default workspace is `keys/`. Use `--output-dir` with create, rotate, compromise, inspect, and check when operating on another local workspace.
+The key directory contains purpose key files plus key lifecycle metadata. The default key directory is `keys/`. Use `--output-dir` with create, rotate, compromise, inspect, and check when operating on another local key directory.
 
-Packet audit can read lifecycle metadata from a specific key workspace:
+Packet audit can read lifecycle metadata from a specific key directory:
 
 ```bash
-python -m tohupono audit proof_packet/ --key-workspace keys/
+python -m tohupono audit proof_packet/ --key-directory keys/
 ```
 
 Compromise metadata appears as a WARN/review trigger. It does not automatically destroy old proofs or change byte-level verification verdicts.
 
 See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.md` for key purpose, rotation, and compromise guidance. Local key logs under `keys/` must not be committed.
+
+## Proof Concepts
+
+Proof Concepts are separate claim models. Registry presence does not imply operational support, and implementation of one concept does not establish another.
+
+TohuPono v0.5.0 introduces a conservative Proof Concepts registry. Initial maturity assignments use only `unmodelled`, `modelled`, `interface_defined`, `locally_supported`, `externally_supported`, `verified_implementation`, `experimental`, and `deprecated`.
+
+- `integrity`: locally supported through byte digests and packet checks.
+- `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
+- `records`: locally supported for canonical record envelopes and subject-digest linkage, but not metadata truth, authority, ownership, identity, authorship, authenticity, legal validity, or external record-management requirements.
+- `provenance`: locally supported for canonical declared lineage edges and child/parent digest linkage, but not parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
+- `transaction`: locally supported for canonical declared transaction envelopes and subject-digest linkage, but not transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, or enforceability.
+- `identity`: locally supported for canonical declared identity assertions and subject-digest linkage, but not verified identity, personhood, account ownership, key control, authority, authorship, ownership, legal identity, or external validation.
+- `lineage`: locally supported for recorded relationships only; completeness of history is not proven.
+- `authenticity`: modelled, not established by digest or signature checks alone.
+- `ownership`: modelled, requiring identity, authority, entitlement, and jurisdiction-specific external evidence.
+- `reality`: modelled as a long-term layered assessment only.
+
+The current executable Proof Concepts are `integrity`, `existence`, `records`, `custody`, `provenance`, `transaction`, and `identity`.
+
+```bash
+python -m tohupono concept list
+python -m tohupono concept list --json
+python -m tohupono concept inspect integrity
+python -m tohupono concept inspect existence --json
+python -m tohupono concept inspect records --json
+python -m tohupono concept inspect custody --json
+python -m tohupono concept inspect provenance --json
+python -m tohupono concept inspect transaction --json
+python -m tohupono concept inspect identity --json
+```
+
+`prove` accepts repeatable `--concept` options. When no concept is supplied, the default executable concept set is `integrity` and `existence`.
+
+```bash
+python -m tohupono prove ./file.bin --concept integrity
+python -m tohupono prove ./file.bin --concept integrity --concept existence
+python -m tohupono prove ./file.bin --concept records --record-json ./record.json
+python -m tohupono prove ./file.bin --concept custody --custody-json ./custody.json
+python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
+python -m tohupono prove ./file.bin --concept transaction --transaction-json ./transfer.json
+python -m tohupono prove ./file.bin --concept identity --identity-json ./identity.json
+```
+
+Concept selection is part of the deterministic proof identity. The selected concept IDs are canonicalised before hashing, so command-line ordering does not change identity. Registry prose, display names, maturity wording, roadmap text, and legal commentary are not included in deterministic claim bodies.
+
+Proof of Records is explicit and descriptor-driven. It is not added by default. A records proof requires `--concept records` plus one or more strict JSON descriptors supplied with `--record-json`.
+
+```json
+{
+  "schema_version": "tohupono.record_descriptor.v1",
+  "record_type": "generic",
+  "namespace": "local",
+  "reference": null,
+  "attributes": {}
+}
+```
+
+Record attributes are stored in the proof manifest. Do not place secrets, private keys, credentials, or unnecessarily sensitive information in record attributes. Proof of Records verifies packet-internal record envelope structure and subject linkage; it does not prove declared metadata truth, authority, ownership, authorship, authenticity, identity, legal status, or legal admissibility.
+
+Legacy packets without a `proof_concepts` declaration remain verifiable. TohuPono reports explicit declared concepts separately from inferred legacy checks and does not mutate old manifests.
 
 ## v0.3.0 Development Goals
 
@@ -125,6 +196,28 @@ Source file content is not copied unless `--include-payload` is explicitly used.
 
 Evidence-chain hashes make recorded events tamper-evident under the local proof packet model. They do not prove external truth, complete custody, or legal admissibility by themselves.
 
+## Timestamping
+
+Proof manifests include a timestamping section. The current implemented adapter records `local_only` timestamp context and never performs network calls.
+
+```bash
+python -m tohupono timestamp inspect proof_packet/
+python -m tohupono timestamp inspect proof_packet/ --json
+```
+
+`local_only` and `missing` timestamp states are reported as `WARN`, not `FAIL`. They do not provide external anchoring. Planned future adapters include OpenTimestamps and RFC 3161.
+
+Manual timestamp receipts can be imported offline:
+
+```bash
+python -m tohupono timestamp import proof_packet/ ./receipt.bin --type manual --json
+python -m tohupono timestamp verify proof_packet/ --policy evidence_review --json
+```
+
+Imported receipts are recorded as `unverified` unless TohuPono can verify the receipt format and external timestamp service. A receipt hash records the attached receipt bytes; it does not prove external timestamp validity by itself.
+
+Timestamp verification policies are `permissive`, `evidence_review` (default), and `strict_external`. The default policy treats local-only timestamps and unverified imported receipts as WARN, while receipt conflicts such as target-digest mismatch or receipt-byte hash mismatch are FAIL. `strict_external` requires verified external timestamp evidence and fails local-only or unverified receipt state.
+
 ## Claim Maturity
 
 TohuPono treats stronger claim language as a maturity target, not a slogan. `docs/CLAIM_MATURITY.md` defines safe technical claim levels, restricted high-risk claim zones, and the FAIL/WARN/LIMIT/TODO response model for integrity gaps.
@@ -172,11 +265,28 @@ Current error codes include `MISSING_FILE`, `MISSING_PROOF`, `INVALID_JSONL`, `I
 
 ```bash
 python -m tohupono prove ./sample.txt --output proof_packet
+python -m tohupono prove ./sample.txt --concept custody --custody-json ./custody.json --output custody_packet
 python -m tohupono verify ./sample.txt --proof proof_packet/manifest.json --json
 python -m tohupono verify-chain proof_packet/evidence_chain.jsonl --json
 python -m tohupono inspect-proof proof_packet/manifest.json --json
 python -m tohupono report --proof proof_packet/manifest.json --format pdf --output verification_report.pdf
 ```
+
+Proof of Custody is an explicit Proof Concept, not a default. It stores canonical declared custody-event envelopes in the manifest and verifies their subject binding, event hashes, previous-event links, and retained chain head. It does not prove physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, or legal admissibility.
+
+Custody descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive location information in custody descriptors.
+
+Proof of Provenance is an explicit Proof Concept, not a default. It stores canonical declared lineage edge envelopes in the manifest and verifies child digest binding, parent digest structure, edge identifiers, deterministic ordering, and claim linkage. It does not prove that parent files exist, that declared transformations occurred, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
+
+Provenance descriptors are strict JSON. Do not place credentials, private keys, secrets, unnecessary personal information, or sensitive operational details in provenance descriptors.
+
+Proof of Transaction is an explicit Proof Concept, not a default. It stores canonical declared transaction envelopes in the manifest and verifies subject binding, participant structure, transaction identifiers, deterministic ordering, and claim linkage. It does not prove that a transaction, payment, delivery, consent, ownership transfer, or legal agreement occurred.
+
+Transaction descriptors are strict JSON. Do not place credentials, private keys, secrets, payment credentials, unnecessary personal information, or sensitive contractual information in transaction descriptors.
+
+Proof of Identity is an explicit Proof Concept, not a default. It stores canonical declared identity assertion envelopes in the manifest and verifies subject binding, identity namespace and identifier structure, assertion identifiers, deterministic ordering, and claim linkage. It does not prove verified identity, personhood, organisational status, account ownership, key control, authorship, ownership, authority, consent, authenticity, legal identity, or external validation.
+
+Identity descriptors are strict JSON. Do not place credentials, private keys, authentication tokens, government identifier numbers, unnecessary personal information, or sensitive identity data in identity descriptors.
 
 Generated proof packets, reports, signatures, and keys are local artefacts and must not be committed.
 

@@ -1,126 +1,178 @@
-# AGENTS.md - Codex Operating Guide for TohuPono
+# AGENTS.md - TohuPono Operating Contract
 
 ## Mission
-Build TohuPono as a deterministic, local-first file-origin proof system. The product must generate, verify, package, sign, timestamp, and report evidence about digital files without making unsupported claims about real-world truth.
+Build TohuPono as a headless, deterministic, local-first proof protocol and proof engine organised around modular Proof Concepts.
 
-The system proves evidence state: file identity, integrity, timestamped existence, signer claims, provenance signals, chain-of-custody continuity, and contradictions between claims and evidence.
+TohuPono must not be defined solely as a file-origin proof system, Proof of Records, Proof of Reality, or Proof of Lineage. Those are narrower claim models or long-term assessment directions inside the broader protocol.
 
-## Non-negotiable principles
-1. Do not invent custom cryptography.
-2. Do not claim a file is "real", "true", "not AI", or "court-proof" unless the evidence model explicitly supports the narrower claim.
-3. Default to offline/private operation. Network anchoring is opt-in.
-4. Treat provenance as layered evidence, not a single score.
-5. Keep the report-signing key separate from file-signing and manifest-signing keys.
-6. Preserve chain-of-custody as append-only events.
-7. Make all output deterministic unless a random key, nonce, timestamp, or signature is explicitly part of the operation.
-8. Never log private keys, secrets, raw sensitive file content, or private metadata by default.
-9. Prefer open standards and well-reviewed libraries: C2PA, Sigstore/cosign, Rekor, OpenTimestamps, RFC 3161, SLSA, BagIt, NIST PQ signatures.
-10. Community Tier must remain fully functional. Branding may differ; features must not be restricted.
+## Architecture
+- Core proof logic remains UI-independent.
+- CLI handlers orchestrate core functions and must not contain durable business logic.
+- Proof Concepts live in `tohupono/concepts/`.
+- Timestamp integrations extend `tohupono/timestamping/`.
+- Trust and key logic remain under `tohupono/trust/`.
+- Report generation remains under `tohupono/reporting/`.
+- Reusable security primitives live under `tohupono/security/`.
+- Deterministic identifiers must not depend on descriptive registry metadata.
 
-## Architecture guardrails
-- Core logic lives in `tohupono/core/` and must be UI-independent.
-- CLI code only orchestrates core functions. Do not bury business logic in command handlers.
-- Evidence integrations live under `tohupono/evidence/`.
-- Trust policy and key handling live under `tohupono/trust/`.
-- Report generation lives under `tohupono/reporting/`.
-- Verdict classification lives under `tohupono/verdicts/`.
-- Vault and persistence live under `tohupono/vault/`.
-- Tests must cover both success and failure paths.
+## Proof Concepts
+Proof Concepts are separate claim models. Implementation of one concept does not establish another.
 
-## Required initial commands for Codex
-Before editing, run:
+Examples include integrity, existence, records, authenticity, origin, lineage, provenance, custody, transaction, ownership, possession, authorship, identity, authority, consent, receipt, publication, preservation, transformation, derivation, witness, verification, compliance, and reality as a long-term layered assessment.
 
-```bash
-pwd
-find . -maxdepth 3 -type f | sort
-python --version || true
-pytest --version || true
-```
+Each Proof Concept must define:
 
-If this is a new repo, initialise the structure from TODO.md before implementing features.
+- exact claim;
+- subject of the claim;
+- required evidence;
+- verification procedure;
+- trust assumptions;
+- failure conditions;
+- implementation maturity;
+- known limitations;
+- privacy implications;
+- legal boundary.
 
-## Development workflow
-1. Read `TODO.md` and choose the smallest incomplete task.
-2. Inspect existing code before editing.
-3. Make one coherent change at a time.
-4. Add or update tests with every behaviour change.
-5. Run the relevant tests.
-6. Update documentation and examples.
-7. Summarise what changed, what was tested, and what remains.
+Registry presence does not imply implemented capability.
 
-## Coding standards
-- Python target: 3.11+.
-- Use type hints for public functions.
-- Use `pydantic` or dataclasses for structured data.
-- Use canonical JSON: UTF-8, sorted keys, stable separators.
-- Use explicit exceptions with actionable messages.
-- Avoid global mutable state.
-- Keep functions small and testable.
-- Use clear enum values for verdicts and evidence classes.
-- Use British English in user-facing documentation.
-- Use te reo Maori names only where they clarify project meaning. Do not use macrons in filenames, package names, or identifiers unless explicitly requested.
+## Claim Boundaries
+- Digest integrity does not automatically prove authenticity.
+- Possession does not automatically prove ownership.
+- A valid signature does not automatically prove legal identity or authorship.
+- A timestamp does not prove content truth.
+- Recorded lineage does not prove that no history is missing.
+- Proof of Reality requires layered independent evidence.
+- Missing evidence must be disclosed.
+- Ambiguous integrity results must fail closed or warn clearly according to the command policy.
 
-## Security rules
-- Private keys must be created with restrictive file permissions.
-- Report-signing keys must be separate from file and manifest keys.
-- CLI must refuse to overwrite existing keys unless `--force` is explicitly supplied.
-- Never upload files or proof packets unless the user selected an anchoring or hosted mode.
-- External calls must be behind explicit flags: `--ots`, `--rekor`, `--c2pa`, `--public-anchor`, or similar.
-- Verification must fail closed when signature, hash, policy, or timestamp validation is ambiguous.
-- Missing evidence is `UNPROVEN`, not `FAKE`.
-- Contradictory evidence is `PROVENANCE_CONFLICT` or `FAKE_BY_CONTRADICTION` only where hard evidence contradicts a claim.
+## Repository Structure
+- `tohupono/core/`: canonical proof logic and packet handling.
+- `tohupono/concepts/`: Proof Concept registry and maturity model.
+- `tohupono/security/`: path, text, atomic-write, lock, and limit helpers.
+- `tohupono/timestamping/`: timestamp models, receipt policy, and provider interfaces.
+- `tohupono/trust/`: key purposes, signing, lifecycle metadata, and key hygiene.
+- `tohupono/reporting/`: human-readable report generation.
+- `tohupono/verdicts/`: verification verdict classification.
+- `tests/`: focused unit and CLI integration tests.
+- `docs/`: protocol, security, claim-boundary, and release documentation.
 
-## Testing expectations
-Every milestone needs:
-- unit tests for pure functions;
-- integration tests for CLI flows;
-- golden fixture tests for proof packet stability;
-- negative tests for altered files, bad signatures, missing keys, invalid manifests, and revoked/disputed proofs;
-- report generation tests ensuring PDF and detached `.sig` are created.
+## Development Workflow
+Before editing, agents must:
 
-Minimum test command:
+1. confirm branch and repository status;
+2. inspect `AGENTS.md`, `SECURITY.md`, relevant source, and tests;
+3. identify the smallest coherent implementation slice;
+4. review security-sensitive paths;
+5. preserve backward compatibility;
+6. add success and failure tests;
+7. update documentation;
+8. run validation;
+9. stop before commit unless explicitly authorised.
 
-```bash
-pytest -q
-```
+## Security Workflow
+For security-sensitive or release-bound work, agents must:
 
-Recommended local quality gate:
+- review the threat model;
+- use Codex Security when requested;
+- distinguish candidates from validated findings;
+- avoid speculative remediation;
+- fix validated critical and high findings before feature expansion;
+- fix validated architecture-relevant medium findings before feature expansion;
+- document deferred findings with exact reasons;
+- fail closed on ambiguous integrity results;
+- avoid unsupported legal, authenticity, ownership, authorship, or reality claims.
 
-```bash
-python -m compileall tohupono tests
-pytest -q
-ruff check . || true
-mypy tohupono || true
-```
+## Cryptographic Rules
+Agents must:
 
-## Documentation expectations
-Update documentation whenever behaviour changes:
-- README quickstart;
-- CLI help examples;
-- proof packet schema notes;
-- trust policy schema;
-- verdict definitions;
-- legal-support disclaimer;
-- enterprise/offline deployment notes.
+- never invent custom cryptography;
+- use reviewed cryptographic tools and libraries;
+- preserve key-purpose separation;
+- never expose private key material;
+- never use shell command strings for OpenSSL;
+- validate generated key material;
+- use bounded subprocess output and timeouts;
+- preserve old valid keys during replacement and rotation;
+- calculate fingerprints from public-key bytes.
 
-## Commit discipline
-Use small commits. Suggested format:
+## Key Lifecycle Rules
+- `key create --force` records `KEY_REPLACED`, not `KEY_ROTATED`.
+- `key rotate` records `KEY_ROTATED` and makes the new generation active.
+- Previous valid generations must remain available for historical verification.
+- Compromise metadata is a WARN and review trigger unless an explicit trust policy makes it fatal.
+- Lifecycle logs are tamper-evident under the local key lifecycle model, not immutable.
+- Internal chain gaps and removal of events referenced by later retained events are detectable.
+- Removal of an unreferenced tail may not be detectable without a retained, signed, or externally anchored head checkpoint.
 
-```text
-feat(cli): add report command
-fix(verify): fail closed on missing manifest digest
-test(report): cover detached PDF signature generation
-docs(trust): document report-signing key separation
-```
+## Timestamp-Provider Rules
+- Existing persisted timestamp values remain compatible.
+- Provider imports must not trigger network calls.
+- No provider performs network activity unless explicitly implemented and authorised.
+- A verified timestamp can support that a specific digest existed no later than a verified time boundary.
+- Timestamps do not establish truth, ownership, authorship, identity, intent, or legal admissibility.
 
-Codex should propose commit messages but must not assume commits were made unless it actually ran git commit.
+## Determinism Rules
+- Use canonical JSON for deterministic data.
+- File identity is based on bytes, not paths.
+- Proof, manifest, event, packet, and record identifiers must not include descriptive Proof Concept registry metadata.
+- Paths, names, extensions, MIME guesses, and OS timestamps are supporting metadata.
 
-## Definition of done
+## Persistence And Path Rules
+Critical state should use:
+
+- bounded structured input;
+- canonical JSON;
+- restrictive private-file modes;
+- atomic replacement;
+- parent-directory fsync where supported;
+- operation-specific locks;
+- symlink checks;
+- path-escape prevention;
+- stable errors.
+
+Sensitive paths must reject traversal, absolute child paths where relative paths are required, NUL characters, ASCII control characters, Unicode bidirectional controls, symlinked sensitive files, and forbidden locations such as `.git` and `.ssh`.
+
+## Testing Requirements
+Every behavioural change requires:
+
+- unit tests;
+- integration tests where applicable;
+- negative tests;
+- tampering tests;
+- compatibility tests;
+- deterministic-output tests;
+- offline tests for provider placeholders;
+- no-macron validation.
+
+## Documentation Requirements
+Update documentation whenever behaviour, command output, proof semantics, security limits, or claim boundaries change.
+
+Documentation must distinguish technical verification, evidence preparation, legal argument, legal admissibility, and legal proof.
+
+## Language Rule
+Do not use macrons in project-authored source code, comments, docstrings, identifiers, filenames, tests, examples, documentation, terminal output, generated reports, configuration, or workflow files.
+
+Use `Maori` and `te reo Maori`.
+
+## Git And Release Discipline
+Agents must not:
+
+- create commits unless authorised;
+- create or move tags unless authorised;
+- force-push;
+- merge release branches without instruction;
+- bump versions outside a release gate;
+- commit keys, signatures, packets, receipts, reports, caches, local scan artefacts, local skills, or development packs.
+
+## Definition Of Done
 A task is complete only when:
+
 - implementation exists;
 - tests pass;
 - documentation is updated;
-- CLI usage is demonstrated;
-- outputs are deterministic where expected;
+- CLI usage is demonstrated where relevant;
+- outputs are deterministic where required;
 - security constraints are preserved;
-- user-facing language avoids unsupported legal or authenticity claims.
+- no-macron validation passes;
+- user-facing language avoids unsupported legal, authenticity, ownership, authorship, or reality claims;
+- final status reports changed files, validation results, known limitations, and remaining risks.
