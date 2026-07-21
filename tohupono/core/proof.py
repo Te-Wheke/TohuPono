@@ -891,11 +891,26 @@ def timestamp_verification_diagnostics(
         if not receipt_path.exists():
             failures.append(f"{receipt_id}_stored_file_missing")
             checks.append({"status": "FAIL", "message": "timestamp receipt file is missing from packet storage."})
-        elif not receipt_path.is_file():
-            failures.append(f"{receipt_id}_stored_file_not_regular")
-            checks.append({"status": "FAIL", "message": "timestamp receipt file is not a regular file."})
         else:
-            actual_sha256 = _file_sha256(receipt_path)
+            try:
+                receipt_bytes = _read_regular_file_limited(
+                    receipt_path,
+                    max_bytes=MAX_RECEIPT_BYTES,
+                    label="Stored timestamp receipt",
+                )
+            except ValueError as exc:
+                message = str(exc)
+                if "size limit" in message:
+                    failures.append(f"{receipt_id}_stored_file_too_large")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt file exceeds configured size limit."})
+                elif "symlink" in message:
+                    failures.append(f"{receipt_id}_stored_file_path_invalid")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt path is invalid or escapes packet storage."})
+                else:
+                    failures.append(f"{receipt_id}_stored_file_not_regular")
+                    checks.append({"status": "FAIL", "message": "timestamp receipt file is not a regular file."})
+                continue
+            actual_sha256 = hashlib.sha256(receipt_bytes).hexdigest()
             if str(receipt.get("receipt_sha256")) != actual_sha256:
                 failures.append(f"{receipt_id}_sha256_mismatch")
                 checks.append({"status": "FAIL", "message": "timestamp receipt SHA-256 does not match stored bytes."})

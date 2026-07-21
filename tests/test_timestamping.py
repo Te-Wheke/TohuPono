@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import tohupono.core.proof as proof_core
 from tohupono.core.proof import create_proof_packet, load_manifest, make_manifest_id
 from tohupono.timestamping.adapters import LocalTimestampAdapter, NoneTimestampAdapter
 from tohupono.timestamping.model import (
@@ -620,6 +621,22 @@ def test_receipt_directory_instead_of_regular_file_is_fail(tmp_path: Path) -> No
     result = run_cli("timestamp", "verify", str(proof_dir), "--json")
     assert result.returncode == 1
     assert any("stored_file_not_regular" in failure for failure in json.loads(result.stdout)["failures"])
+
+
+def test_receipt_oversized_stored_file_is_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = tmp_path / "source.txt"
+    sample.write_text("oversized stored receipt\n", encoding="utf-8")
+    receipt = tmp_path / "receipt.txt"
+    receipt.write_text("manual receipt\n", encoding="utf-8")
+    proof_dir = tmp_path / "proof_packet"
+    create_proof_packet(sample, proof_dir)
+    record = _import_receipt(proof_dir, receipt)
+    stored = proof_dir / str(record["receipt_path"])
+    stored.write_bytes(b"x" * 8)
+    monkeypatch.setattr(proof_core, "MAX_RECEIPT_BYTES", 4)
+    data = proof_core.timestamp_verification_diagnostics(proof_dir)
+    assert data["status"] == "fail"
+    assert any("stored_file_too_large" in failure for failure in data["failures"])
 
 
 def test_receipt_sha256_mismatch_is_fail(tmp_path: Path) -> None:
