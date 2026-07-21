@@ -1,6 +1,6 @@
 # Timestamp Adapters
 
-TohuPono v0.5.0 defines timestamp provider interfaces before external implementations.
+TohuPono v0.5.0 defines timestamp provider interfaces before external timestamp implementations.
 
 Provider identifiers:
 

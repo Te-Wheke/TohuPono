@@ -92,7 +92,7 @@ See `docs/KEY_MANAGEMENT.md`, `docs/KEY_ROTATION.md`, and `docs/KEY_COMPROMISE.m
 
 Proof Concepts are separate claim models. Registry presence does not imply operational support, and implementation of one concept does not establish another.
 
-Current v0.5.0 development introduces a conservative Proof Concepts registry. Initial maturity assignments use only `unmodelled`, `modelled`, `interface_defined`, `locally_supported`, `externally_supported`, `verified_implementation`, `experimental`, and `deprecated`.
+TohuPono v0.5.0 introduces a conservative Proof Concepts registry. Initial maturity assignments use only `unmodelled`, `modelled`, `interface_defined`, `locally_supported`, `externally_supported`, `verified_implementation`, `experimental`, and `deprecated`.
 
 - `integrity`: locally supported through byte digests and packet checks.
 - `existence`: locally supported through local timestamp and imported-receipt handling; independently verified external timestamping is absent.
@@ -113,6 +113,7 @@ python -m tohupono concept list --json
 python -m tohupono concept inspect integrity
 python -m tohupono concept inspect existence --json
 python -m tohupono concept inspect records --json
+python -m tohupono concept inspect custody --json
 python -m tohupono concept inspect provenance --json
 python -m tohupono concept inspect transaction --json
 python -m tohupono concept inspect identity --json
@@ -124,6 +125,7 @@ python -m tohupono concept inspect identity --json
 python -m tohupono prove ./file.bin --concept integrity
 python -m tohupono prove ./file.bin --concept integrity --concept existence
 python -m tohupono prove ./file.bin --concept records --record-json ./record.json
+python -m tohupono prove ./file.bin --concept custody --custody-json ./custody.json
 python -m tohupono prove ./file.bin --concept provenance --provenance-json ./lineage.json
 python -m tohupono prove ./file.bin --concept transaction --transaction-json ./transfer.json
 python -m tohupono prove ./file.bin --concept identity --identity-json ./identity.json

@@ -24,7 +24,7 @@ Timestamping:
 - `local_only` records local system time and target digest only;
 - local timestamps are not external anchors;
 - missing or local-only timestamping is a warning, not a verification failure;
-- OpenTimestamps and RFC 3161 are planned adapter types, not implemented network integrations in this slice.
+- OpenTimestamps and RFC 3161 are planned adapter types, not implemented network integrations in v0.5.0.
 - imported timestamp receipts are stored as packet evidence with receipt hash, size, target digest, import time, and warning metadata;
 - imported receipts remain `unverified` until an adapter can verify the receipt format and external timestamp service.
 - timestamp verification policies are `permissive`, `evidence_review`, and `strict_external`;
@@ -36,14 +36,14 @@ Proof Concept registry metadata is descriptive governance data. It must not alte
 
 ## Executable Proof Concepts
 
-The first executable Proof Concepts are:
+Executable Proof Concepts are:
 
 - `integrity`;
 - `existence`;
-- `records`.
+- `records`;
 - `custody`;
 - `provenance`;
-- `transaction`.
+- `transaction`;
 - `identity`.
 
 Registered concepts such as `authenticity`, `ownership`, and `reality` are not made executable merely by appearing in the registry.

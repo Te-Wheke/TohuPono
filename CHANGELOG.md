@@ -1,56 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 - 2026-07-21
 
-- Added Proof Concepts governance for distinct proof claim models and maturity boundaries.
-- Added a conservative Proof Concepts registry with deterministic output.
-- Added `tohupono concept list` and `tohupono concept inspect` for deterministic Proof Concept inspection.
-- Added executable Proof Concept handling for `integrity` and `existence` only.
-- Added repeatable `prove --concept` selection with default `integrity` and `existence` concepts.
-- Added manifest `proof_concepts` declarations with stable claim IDs and no mutable registry prose.
-- Added audit, verify-file, and report integration for declared Proof Concept results.
-- Preserved legacy packet verification with a warning when explicit Proof Concept declarations are absent.
-- Added executable Proof of Records support through strict JSON record descriptors, canonical record envelopes, deterministic `rec_...` record IDs, and records claim linkage.
-- Added repeatable `prove --record-json` for explicit `--concept records` proofs.
-- Added `tohupono record validate` and `tohupono record inspect` for descriptor validation and packet record inspection.
-- Added audit and report integration for Proof of Records without asserting metadata truth, authority, ownership, authorship, authenticity, identity, legal validity, or legal admissibility.
-- Added executable Proof of Custody support through strict JSON custody descriptors, canonical custody-event envelopes, deterministic `cue_...` event IDs, hash-linked retained event sequences, chain-head validation, and custody claim linkage.
-- Added repeatable `prove --custody-json` for explicit `--concept custody` proofs.
-- Added `tohupono custody validate` and `tohupono custody inspect` for descriptor validation and packet custody inspection.
-- Added audit and report integration for Proof of Custody without asserting physical possession, actor identity, legal custody, complete history, event occurrence, ownership, authorship, authenticity, authority, truth, immutability, or legal admissibility.
-- Added executable Proof of Provenance support through strict JSON provenance descriptors, canonical lineage edge envelopes, deterministic `prv_...` edge IDs, child/parent digest binding, and provenance claim linkage.
-- Added repeatable `prove --provenance-json` for explicit `--concept provenance` proofs.
-- Added `tohupono provenance validate` and `tohupono provenance inspect` for descriptor validation and packet provenance inspection.
-- Added audit and report integration for Proof of Provenance without asserting parent file existence, actual derivation, verified origin, authorship, ownership, authenticity, authority, complete lineage, truth, legal validity, or external registration.
-- Added executable Proof of Transaction support through strict JSON transaction descriptors, canonical transaction envelopes, deterministic `txn_...` transaction IDs, subject binding, participant canonicalisation, and transaction claim linkage.
-- Added repeatable `prove --transaction-json` for explicit `--concept transaction` proofs.
-- Added `tohupono transaction validate` and `tohupono transaction inspect` for descriptor validation and packet transaction inspection.
-- Added audit and report integration for Proof of Transaction without asserting transaction occurrence, payment, delivery, participant identity, consent, authority, ownership transfer, legal effect, authenticity, authorship, or enforceability.
-- Added executable Proof of Identity support through strict JSON identity descriptors, canonical identity assertion envelopes, deterministic `idn_...` assertion IDs, subject binding, and identity claim linkage.
-- Added repeatable `prove --identity-json` for explicit `--concept identity` proofs.
-- Added `tohupono identity validate` and `tohupono identity inspect` for descriptor validation and packet identity inspection.
-- Added audit and report integration for Proof of Identity without asserting verified identity, personhood, organisational status, key control, authority, authorship, ownership, legal identity, or external validation.
-- Rewrote `AGENTS.md` as the operating contract for TohuPono development agents.
-- Added shared security helpers for path validation, atomic writes, local locks, bounded diagnostics, and text validation.
-- Hardened key replacement so `key create --force` records `KEY_REPLACED` and does not delete the active keypair before replacement material is generated and validated.
-- Changed `key rotate` to promote a new active key generation while retaining the previous generation for historical verification.
-- Added rollback behaviour for key replacement or rotation when lifecycle event persistence fails after key promotion.
-- Added canonical key lifecycle events with local tamper-evident hash chaining while preserving legacy rotation and compromise log readability.
-- Documented lifecycle truncation limits: unreferenced tail removal may not be detectable without a retained, signed, or externally anchored head checkpoint.
-- Added timestamp provider registry placeholders for OpenTimestamps and RFC 3161 without network calls.
-- Added project-authored no-macron validation.
-- Added timestamp proof model and adapter interface.
-- Added `none` and `local` timestamp adapters without network calls.
-- Added manifest `timestamping` metadata with `local_only` status for locally created proof packets.
-- Added `tohupono timestamp inspect <packet>` human and JSON diagnostics.
-- Added offline `tohupono timestamp import <packet> <receipt-file>` receipt metadata import.
-- Added `tohupono timestamp verify <packet>` with permissive, evidence-review, and strict-external policies.
-- Added timestamp receipt type/status vocabulary and receipt SHA-256 recording.
-- Added receipt conflict diagnostics for target mismatch, missing stored receipt bytes, receipt hash mismatch, duplicate IDs, unsupported types, and invalid statuses.
-- Added audit warnings for imported but unverified timestamp receipts.
-- Added audit FAIL integration for corrupted timestamp receipt metadata under the default evidence-review policy.
-- Added audit reporting for missing and local-only timestamp states as `WARN`, not `FAIL`.
-- Documented timestamp status vocabulary, imported receipt limits, local-only limits, and planned OpenTimestamps/RFC 3161 adapters.
+- Added modular Proof Concepts governance, registry inspection, deterministic concept claims, and executable verification for `integrity`, `existence`, `records`, `custody`, `provenance`, `transaction`, and `identity`.
+- Kept default Proof Concepts limited to `existence` and `integrity`; non-default concepts require explicit `--concept` selection and their descriptor flags.
+- Added strict descriptor parsing, canonical manifest sections, deterministic IDs, subject-digest binding, exact claim linkage, audit integration, report integration, validation CLI commands, and inspection CLI commands for Records, Custody, Provenance, Transaction, and Identity.
+- Preserved concept separation: Records, Custody, Provenance, Transaction, and Identity remain packet-internal declared metadata consistency checks and do not establish truth, authenticity, authorship, ownership, consent, authority, legal effect, payment, delivery, verified identity, external registration, or complete history.
+- Added timestamp adapter interfaces, `none` and `local` adapters, offline receipt import, receipt diagnostics, timestamp verification policies, and placeholder OpenTimestamps/RFC 3161 provider interfaces without network calls or external timestamp verification.
+- Hardened timestamp evidence handling so packet-controlled `anchored` or `verified` metadata cannot self-authorise external timestamp status; stored receipts use bounded regular-file reads, path containment, symlink rejection, and no-follow write protections.
+- Strengthened deterministic integrity by preserving canonical manifests, deterministic proof identifiers, manifest IDs, packet IDs, evidence-chain validation, deterministic claim ordering, copy/rename byte-digest semantics, and tamper detection.
+- Hardened malformed concept data handling with strict collection-level field validation for Records, Custody, Provenance, Transaction, and Identity, fail-closed claim linkage, duplicate detection, and reordered Records claim rejection.
+- Preserved the active key interface as `--key-directory` / `key_directory` and kept active `--key-workspace` / `key_workspace` use absent.
+- Preserved `create_proof_packet` positional compatibility by appending new descriptor parameters after existing Provenance and Transaction slots.
+- Added lazy report-renderer imports so CLI version/help and non-report commands start without eager ReportLab/Pillow loading, while report generation and detached report signatures remain supported.
+- Added project-authored no-macron validation, C1 control-character rejection, shared path/atomic/lock/bounded-input helpers, and key lifecycle hardening with legacy log compatibility.
+- Preserved v0.4.0 packet audit, report, proof-ID, manifest-signature, and report-signature compatibility.
+- Deferred non-blocking hardening: broader descriptor no-follow helper reuse, key lifecycle JSONL concurrency hardening, further human-output path sanitisation, and hostile-symlink hardening for `scripts/check_no_macrons.py`.
 
 ## v0.4.0 - 2026-07-10
 

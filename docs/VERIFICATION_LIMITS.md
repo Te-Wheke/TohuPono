@@ -21,12 +21,15 @@ Executable concept support is currently limited to `integrity`, `existence`, `re
 - `existence` reviews available timestamp evidence for the recorded digest.
 - `records` verifies canonical record envelopes and their link to the packet subject digest.
 - `custody` verifies canonical custody-event envelopes, retained hash links, subject binding, and claim linkage.
+- `provenance` verifies canonical declared lineage edges, child/parent digest structure, subject binding, and claim linkage.
+- `transaction` verifies canonical declared transaction envelopes, participant structures, subject binding, and claim linkage.
+- `identity` verifies canonical declared identity assertions, declared identifier structures, subject binding, and claim linkage.
 
 `integrity` does not prove authenticity, authorship, ownership, legal identity, original creation, truth, or absence of earlier manipulation.
 
 `existence` does not prove content truth. Local timestamps are local evidence only, not authoritative time, external witnessing, immutability, legal proof, or independent anchoring.
 
-Other registered concepts remain non-executable until a future implementation defines the required evidence and verification procedure.
+Registered concepts outside the executable set remain non-executable until a future implementation defines the required evidence and verification procedure.
 
 `records` does not prove declared metadata truth, external registration, authority, ownership, identity, authorship, authenticity, legal validity, legal admissibility, completeness of history, or accuracy of an external reference. Record attributes are user-declared manifest data and may be sensitive; do not place secrets, private keys, credentials, or unnecessary private metadata in record attributes.
 

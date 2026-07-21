@@ -1,6 +1,6 @@
 # Timestamping
 
-TohuPono v0.5.0 development starts with timestamp adapter architecture before external timestamp implementations.
+TohuPono v0.5.0 provides timestamp adapter architecture before external timestamp implementations.
 
 Timestamp statuses:
 
@@ -20,7 +20,7 @@ Adapter types:
 - `rfc3161`
 - `manual`
 
-This slice implements only `none` and `local` adapters. It does not call OpenTimestamps, RFC 3161 timestamp authorities, blockchains, transparency logs, C2PA services, Sigstore, Rekor, W3C VC systems, or any network service.
+This release implements only `none` and `local` adapters. It does not call OpenTimestamps, RFC 3161 timestamp authorities, blockchains, transparency logs, C2PA services, Sigstore, Rekor, W3C VC systems, or any network service.
 
 The v0.5.0 provider registry includes offline placeholders for `opentimestamps` and `rfc3161`. They return structured unavailable or deferred results and perform no network calls or external commands.
 
@@ -55,7 +55,7 @@ Receipt statuses:
 
 Manual receipt import records receipt metadata and a copy of the receipt bytes under the proof packet. The receipt record includes receipt ID, type, stored path, receipt hash, receipt size, target digest, import time, status, and warnings.
 
-Imported receipts are `unverified` unless TohuPono can verify the receipt format and external service. In this slice, imported receipts are not externally verified. A receipt hash proves the receipt file was attached or imported into the packet; it does not prove the external timestamp is valid.
+Imported receipts are `unverified` unless TohuPono can verify the receipt format and external service. In v0.5.0, imported receipts are not externally verified. A receipt hash proves the receipt file was attached or imported into the packet; it does not prove the external timestamp is valid.
 
 Timestamp policies:
 
